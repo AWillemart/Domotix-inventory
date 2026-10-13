@@ -1,0 +1,70 @@
+version: "3.8"
+
+services:
+  # =========================================================================
+  # Domotix : Application Principale d'Inventaire Domotique Vocal
+  # =========================================================================
+  domotix:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: domotix-inventory
+    restart: unless-stopped
+    ports:
+      # Port 8585 par défaut pour éviter tout conflit avec le port 8000 souvent occupé sur ZimaOS/CasaOS
+      - "${PORT:-8585}:8000"
+    volumes:
+      # Volume persistant pour la base de données SQLite
+      - ./data:/data
+    environment:
+      - DATABASE_URL=sqlite:////data/inventory.db
+      # URLs des microservices IA locaux (adaptables selon votre réseau ZimaOS)
+      - OLLAMA_URL=http://ollama:11434
+      - WHISPER_URL=http://faster-whisper:9000
+      - PIPER_URL=http://piper:5000
+      - DEFAULT_OLLAMA_MODEL=gemma3:4b
+    networks:
+      - domotix-network
+    # Permet de communiquer avec l'hôte ZimaOS si Ollama/Whisper tournent hors Docker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # =========================================================================
+  # OPTIONNEL : Microservices Locaux Clé-en-main sur ZimaOS
+  # Décommentez ces blocs si vous souhaitez lancer Whisper & Piper via ce compose
+  # =========================================================================
+  
+  # faster-whisper:
+  #   image: fedirz/faster-whisper-server:latest-cpu
+  #   container_name: domotix-whisper
+  #   restart: unless-stopped
+  #   ports:
+  #     - "9000:9000"
+  #   environment:
+  #     - WHISPER_MODEL=small
+  #     - WHISPER_LANGUAGE=fr
+  #   volumes:
+  #     - ./whisper-models:/root/.cache/huggingface
+  #   networks:
+  #     - domotix-network
+
+  # piper-tts:
+  #   image: rhasspy/wyoming-piper:latest
+  #   container_name: domotix-piper
+  #   restart: unless-stopped
+  #   ports:
+  #     - "5000:5000"
+  #   command: ["--voice", "fr_FR-siwis-medium", "--uri", "tcp://0.0.0.0:5000"]
+  #   volumes:
+  #     - ./piper-data:/data
+  #   networks:
+  #     - domotix-network
+
+networks:
+  domotix-network:
+    name: domotix-network
+    driver: bridge
+
+volumes:
+  data:
+    name: domotix_data

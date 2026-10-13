@@ -1,0 +1,1754 @@
+<!DOCTYPE html>
+<html lang="fr" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Domotix - Inventaire Domotique Vocal</title>
+  
+  <!-- TailwindCSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              500: '#10b981',
+              600: '#059669',
+              700: '#047857',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.25); opacity: 0.3; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .recording-pulse {
+      animation: pulse-ring 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body id="app-body" class="h-full flex flex-col font-sans antialiased text-slate-100 bg-slate-950 transition-colors duration-200">
+
+  <!-- ===================================================================== -->
+  <!-- BARRE DE NAVIGATION EN-TÊTE -->
+  <!-- ===================================================================== -->
+  <header id="main-header" class="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center space-x-3">
+      <div id="brand-logo" class="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+        <i data-lucide="boxes" class="w-5 h-5"></i>
+      </div>
+      <div>
+        <h1 class="text-base font-semibold text-white tracking-tight leading-tight flex items-center gap-1.5">
+          Domotix
+          <span id="zima-badge" class="text-[10px] font-mono uppercase bg-emerald-950 text-emerald-400 border border-emerald-800/60 px-1.5 py-0.5 rounded font-medium">ZimaOS</span>
+        </h1>
+        <p class="text-xs text-slate-400 leading-tight">Inventaire Domotique Vocal</p>
+      </div>
+    </div>
+
+    <!-- Onglets de navigation -->
+    <nav class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-medium">
+      <button onclick="switchTab('assistant')" id="nav-assistant" class="tab-btn px-3 py-1.5 rounded-lg transition-colors bg-emerald-600 text-white flex items-center gap-1.5">
+        <i data-lucide="mic" class="w-3.5 h-3.5"></i>
+        <span>Vocal</span>
+      </button>
+      <button onclick="switchTab('inventory')" id="nav-inventory" class="tab-btn px-3 py-1.5 rounded-lg transition-colors text-slate-400 hover:text-slate-200 flex items-center gap-1.5">
+        <i data-lucide="folder-tree" class="w-3.5 h-3.5"></i>
+        <span>Inventaire</span>
+      </button>
+      <button onclick="switchTab('settings')" id="nav-settings" class="tab-btn px-3 py-1.5 rounded-lg transition-colors text-slate-400 hover:text-slate-200 flex items-center gap-1.5">
+        <i data-lucide="sliders" class="w-3.5 h-3.5"></i>
+        <span>Réglages</span>
+      </button>
+    </nav>
+  </header>
+
+  <!-- ===================================================================== -->
+  <!-- CONTENU PRINCIPAL -->
+  <!-- ===================================================================== -->
+  <main class="flex-1 overflow-y-auto p-4 md:p-6 max-w-4xl mx-auto w-full space-y-6">
+
+    <!-- ------------------------------------------------------------------- -->
+    <!-- SECTION 1 : ASSISTANT VOCAL ET TEXTUEL -->
+    <!-- ------------------------------------------------------------------- -->
+    <section id="tab-assistant" class="space-y-6">
+      
+      <!-- Carte principale de capture vocale -->
+      <div id="voice-card" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center shadow-xl relative overflow-hidden">
+        <div class="absolute -top-24 -left-24 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
+        <div class="absolute -bottom-24 -right-24 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+        <div class="max-w-md mx-auto space-y-4">
+          <p id="theme-tagline" class="text-xs uppercase tracking-wider font-semibold text-emerald-400">Commande Vocale & IA Locale</p>
+          <h2 class="text-lg md:text-xl font-medium text-white">Parlez pour ajouter ou chercher</h2>
+          <p class="text-xs text-slate-400">
+            Dites : <span class="text-slate-300 italic">"Dans le garage devant l'étagère, dans la boîte à vis j'ai des chevilles"</span> ou <span class="text-slate-300 italic">"Je cherche le tournevis"</span>.
+          </p>
+
+          <!-- Bouton Micro Central -->
+          <div class="pt-4 pb-2 flex flex-col items-center justify-center">
+            <div class="relative">
+              <div id="mic-pulse-ring" class="hidden absolute inset-0 rounded-full bg-emerald-500/30 recording-pulse"></div>
+              <button id="mic-button" onclick="toggleRecording()" class="relative z-10 w-24 h-24 rounded-full bg-emerald-600 hover:bg-emerald-500 active:scale-95 transition-all shadow-lg shadow-emerald-950 flex flex-col items-center justify-center text-white border-2 border-emerald-400/40">
+                <i id="mic-icon" data-lucide="mic" class="w-10 h-10 transition-transform"></i>
+                <span id="mic-status-text" class="text-[11px] font-medium tracking-wide mt-1">Parler</span>
+              </button>
+            </div>
+            
+            <p id="recording-timer" class="text-xs text-slate-400 font-mono mt-3 h-4"></p>
+          </div>
+
+          <!-- Entrée audio mobile alternative (Dictaphone natif même en HTTP) -->
+          <div class="flex items-center justify-center gap-2 pt-1">
+            <label class="text-[11px] text-slate-400 hover:text-emerald-400 cursor-pointer flex items-center gap-1.5 bg-slate-950/80 px-3 py-1.5 rounded-lg border border-slate-800 transition-colors">
+              <i data-lucide="mic-external" class="w-3.5 h-3.5 text-emerald-400"></i>
+              <span>Dictaphone natif (Mobile HTTP)</span>
+              <input type="file" id="native-audio-upload" accept="audio/*" capture="microphone" class="hidden" onchange="handleNativeAudioUpload(this)">
+            </label>
+            <button onclick="showMicrophoneHelpModal()" class="text-[11px] text-slate-500 hover:text-slate-300 p-1.5" title="Aide microphone HTTP">
+              <i data-lucide="help-circle" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+
+          <!-- Entrée textuelle -->
+          <div class="pt-2">
+            <div class="relative flex items-center">
+              <input type="text" id="text-input" placeholder="Ou saisissez votre phrase ici..." 
+                     class="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-4 pr-12 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                     onkeydown="if(event.key === 'Enter') submitTextPrompt()">
+              <button onclick="submitTextPrompt()" class="absolute right-2 p-2 text-slate-400 hover:text-emerald-400 transition-colors">
+                <i data-lucide="arrow-right" class="w-4 h-4"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Indicateur de traitement -->
+      <div id="loading-indicator" class="hidden bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center justify-center gap-3 text-sm text-slate-300">
+        <div class="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+        <span id="loading-message">Traitement en cours...</span>
+      </div>
+
+      <!-- Résultat de recherche / Réponse vocale -->
+      <div id="search-result-box" class="hidden bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div class="flex items-center gap-2 text-emerald-400 text-sm font-medium">
+            <i data-lucide="search-check" class="w-4 h-4"></i>
+            <span>Résultat de la recherche</span>
+          </div>
+          <button id="replay-tts-btn" onclick="replayLastTTS()" class="text-xs text-slate-400 hover:text-emerald-400 flex items-center gap-1.5 transition-colors bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
+            <i data-lucide="volume-2" class="w-4 h-4"></i>
+            <span>Réécouter</span>
+          </button>
+        </div>
+
+        <p id="search-spoken-text" class="text-sm text-slate-200 bg-slate-950 p-3.5 rounded-xl border border-slate-800/80 leading-relaxed"></p>
+
+        <!-- Liste des objets trouvés -->
+        <div id="search-matches-list" class="grid gap-2 sm:grid-cols-2"></div>
+      </div>
+
+      <!-- Récemment enregistrés -->
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <h3 class="text-xs uppercase tracking-wider font-semibold text-slate-400">Récemment Enregistrés</h3>
+          <button onclick="loadInventoryTree()" class="text-xs text-emerald-400 hover:underline">Rafraîchir</button>
+        </div>
+        <div id="recent-items-container" class="space-y-2 text-xs text-slate-400">
+          <p class="italic text-slate-500">Aucun élément ajouté lors de cette session.</p>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ------------------------------------------------------------------- -->
+    <!-- SECTION 2 : EXPLORATEUR D'INVENTAIRE (CRUD INTÉGRÉ SANS ALERT BOX) -->
+    <!-- ------------------------------------------------------------------- -->
+    <section id="tab-inventory" class="hidden space-y-5">
+      
+      <!-- Barre d'outils inventaire -->
+      <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+        <div class="relative flex-1">
+          <i data-lucide="search" class="w-4 h-4 absolute left-3 top-3 text-slate-500"></i>
+          <input type="text" id="inventory-filter" oninput="filterInventory(this.value)" placeholder="Filtrer les objets, boîtes, pièces..." 
+                 class="w-full bg-slate-900 border border-slate-800 rounded-xl py-2 pl-9 pr-4 text-xs text-slate-200 focus:outline-none focus:border-emerald-500">
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="openModalAddPiece()" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors whitespace-nowrap">
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+            <span>Nouvelle Pièce</span>
+          </button>
+          <button onclick="loadInventoryTree()" class="p-2 bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 rounded-xl transition-colors" title="Actualiser">
+            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Arborescence Interactive -->
+      <div id="inventory-tree-container" class="space-y-3">
+        <div class="p-8 text-center text-slate-500 text-xs">
+          <div class="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+          Chargement de l'inventaire...
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ------------------------------------------------------------------- -->
+    <!-- SECTION 3 : PARAMÈTRES ET PERSONNALISATION -->
+    <!-- ------------------------------------------------------------------- -->
+    <section id="tab-settings" class="hidden space-y-6">
+      
+      <!-- Apparence et Thème -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-lg">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div class="flex items-center gap-2">
+            <i data-lucide="palette" class="w-4 h-4 text-emerald-400"></i>
+            <div>
+              <h2 class="text-sm font-semibold text-white">Apparence & Thème</h2>
+              <p class="text-xs text-slate-400">Personnalisez la couleur dominante et le contraste.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mode Sombre / Clair -->
+        <div class="flex items-center justify-between pt-1">
+          <div>
+            <span class="block text-xs font-medium text-slate-200">Mode d'affichage</span>
+            <span id="theme-mode-text" class="text-[11px] text-slate-400">Mode sombre</span>
+          </div>
+          <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-medium">
+            <button onclick="setColorMode('dark')" id="btn-mode-dark" class="px-3 py-1.5 rounded-lg transition-colors bg-emerald-600 text-white flex items-center gap-1.5">
+              <i data-lucide="moon" class="w-3.5 h-3.5"></i>
+              <span>Sombre</span>
+            </button>
+            <button onclick="setColorMode('light')" id="btn-mode-light" class="px-3 py-1.5 rounded-lg transition-colors text-slate-400 hover:text-slate-200 flex items-center gap-1.5">
+              <i data-lucide="sun" class="w-3.5 h-3.5"></i>
+              <span>Clair</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Palette Couleurs Dominantes -->
+        <div class="space-y-2 pt-2 border-t border-slate-800">
+          <label class="block text-xs font-medium text-slate-200">Couleur dominante</label>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1" id="theme-color-buttons">
+            <!-- Injecté dynamiquement par JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Services Locaux ZimaOS -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-5 shadow-lg">
+        <div>
+          <h2 class="text-sm font-semibold text-white">Services Locaux ZimaOS</h2>
+          <p class="text-xs text-slate-400">Testez en direct la connexion vers Ollama, Faster-Whisper et Piper-TTS.</p>
+        </div>
+
+        <!-- Ollama API -->
+        <div class="space-y-2 border-t border-slate-800 pt-4">
+          <label class="block text-xs font-medium text-slate-300">URL API Ollama</label>
+          <div class="flex gap-2">
+            <input type="text" id="cfg-ollama-url" value="http://ollama:11434" class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-mono">
+            <button onclick="testService('ollama')" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-xs text-slate-200 font-medium transition-colors flex items-center gap-1.5">
+              <span id="badge-ollama" class="w-2 h-2 rounded-full bg-slate-600"></span>
+              Tester
+            </button>
+          </div>
+          <div class="flex items-center justify-between pt-1">
+            <span class="text-[11px] text-slate-500">Modèles détectés :</span>
+            <div class="flex items-center gap-2">
+              <select id="cfg-ollama-model" class="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-300 font-mono">
+                <option value="gemma3:4b">gemma3:4b</option>
+                <option value="llama3:8b">llama3:8b</option>
+                <option value="mistral">mistral</option>
+              </select>
+              <button onclick="refreshOllamaModels()" class="p-1.5 bg-slate-950 border border-slate-800 text-slate-400 hover:text-emerald-400 rounded-lg" title="Lister les modèles d'Ollama">
+                <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Faster-Whisper API -->
+        <div class="space-y-2 border-t border-slate-800 pt-4">
+          <label class="block text-xs font-medium text-slate-300">URL API Faster-Whisper</label>
+          <div class="flex gap-2">
+            <input type="text" id="cfg-whisper-url" value="http://faster-whisper:9000" class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-mono">
+            <button onclick="testService('whisper')" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-xs text-slate-200 font-medium transition-colors flex items-center gap-1.5">
+              <span id="badge-whisper" class="w-2 h-2 rounded-full bg-slate-600"></span>
+              Tester
+            </button>
+          </div>
+        </div>
+
+        <!-- Piper-TTS API -->
+        <div class="space-y-2 border-t border-slate-800 pt-4">
+          <label class="block text-xs font-medium text-slate-300">URL API Piper-TTS</label>
+          <div class="flex gap-2">
+            <input type="text" id="cfg-piper-url" value="http://piper:5000" class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-mono">
+            <button onclick="testService('piper')" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-xs text-slate-200 font-medium transition-colors flex items-center gap-1.5">
+              <span id="badge-piper" class="w-2 h-2 rounded-full bg-slate-600"></span>
+              Tester
+            </button>
+          </div>
+        </div>
+
+        <!-- Validation switch -->
+        <div class="border-t border-slate-800 pt-4 flex items-center justify-between">
+          <div>
+            <span class="block text-xs font-medium text-slate-200">Validation avant ajout</span>
+            <span class="text-[11px] text-slate-400">Affiche une modale pour vérifier la pièce, l'emplacement et les objets détectés.</span>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" id="cfg-require-validation" class="sr-only peer" checked>
+            <div class="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+          </label>
+        </div>
+
+        <div class="border-t border-slate-800 pt-4 flex justify-end">
+          <button onclick="saveSettings()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-medium transition-colors flex items-center gap-1.5 shadow-md">
+            <i data-lucide="check" class="w-3.5 h-3.5"></i>
+            <span>Enregistrer les réglages</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Export & Import -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-lg">
+        <div>
+          <h2 class="text-sm font-semibold text-white">Sauvegarde & Restauration</h2>
+          <p class="text-xs text-slate-400">Exportez ou restaurez votre inventaire SQLite au format JSON ou CSV.</p>
+        </div>
+
+        <div class="space-y-3 pt-2">
+          <div class="grid grid-cols-2 gap-3">
+            <a href="/api/export/json" download class="p-3 bg-slate-950 border border-slate-800 hover:border-emerald-500 rounded-xl text-center text-xs font-medium text-slate-200 flex flex-col items-center justify-center gap-2 transition-colors">
+              <i data-lucide="download" class="w-4 h-4 text-emerald-400"></i>
+              <span>Exporter JSON</span>
+            </a>
+            <a href="/api/export/csv" download class="p-3 bg-slate-950 border border-slate-800 hover:border-emerald-500 rounded-xl text-center text-xs font-medium text-slate-200 flex flex-col items-center justify-center gap-2 transition-colors">
+              <i data-lucide="file-spreadsheet" class="w-4 h-4 text-emerald-400"></i>
+              <span>Exporter CSV</span>
+            </a>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <label class="p-3 bg-slate-950 border border-slate-800 hover:border-emerald-500 rounded-xl text-center text-xs font-medium text-slate-200 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors">
+              <i data-lucide="upload" class="w-4 h-4 text-emerald-400"></i>
+              <span>Importer JSON</span>
+              <input type="file" accept=".json" class="hidden" onchange="uploadImportFile(this, 'json')">
+            </label>
+            <label class="p-3 bg-slate-950 border border-slate-800 hover:border-emerald-500 rounded-xl text-center text-xs font-medium text-slate-200 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors">
+              <i data-lucide="upload" class="w-4 h-4 text-emerald-400"></i>
+              <span>Importer CSV</span>
+              <input type="file" accept=".csv" class="hidden" onchange="uploadImportFile(this, 'csv')">
+            </label>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- ===================================================================== -->
+  <!-- MODALE DE VALIDATION AVEC DROPDOWNS EN CASCADE INTELLIGENTS -->
+  <!-- ===================================================================== -->
+  <div id="modal-validation" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-5 space-y-4 shadow-2xl overflow-hidden">
+      
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div class="flex items-center gap-2 text-emerald-400 font-medium text-sm">
+          <i data-lucide="sparkles" class="w-4 h-4"></i>
+          <span>Vérification avant enregistrement</span>
+        </div>
+        <button onclick="closeValidationModal()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div class="text-xs text-slate-400">
+        Phrase détectée : <span id="val-raw-transcription" class="text-slate-200 italic"></span>
+      </div>
+
+      <!-- Formulaire avec listes déroulantes intelligentes en cascade -->
+      <div class="space-y-3.5">
+        <!-- 1. Pièce -->
+        <div>
+          <label class="block text-[11px] font-medium text-slate-400 mb-1">Pièce (Lieu global)</label>
+          <div class="space-y-1.5">
+            <select id="val-room-select" onchange="onValidationRoomChanged()" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"></select>
+            <input type="text" id="val-room-custom" placeholder="Nom de la nouvelle pièce..." class="hidden w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500">
+          </div>
+        </div>
+
+        <!-- 2. Emplacement -->
+        <div>
+          <label class="block text-[11px] font-medium text-slate-400 mb-1">Emplacement dans cette pièce</label>
+          <div class="space-y-1.5">
+            <select id="val-location-select" onchange="onValidationLocationChanged()" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"></select>
+            <input type="text" id="val-location-custom" placeholder="Nom du nouvel emplacement..." class="hidden w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500">
+          </div>
+        </div>
+
+        <!-- 3. Contenant -->
+        <div>
+          <label class="block text-[11px] font-medium text-slate-400 mb-1">Contenant (Boîte, Caisse, Meuble)</label>
+          <div class="space-y-1.5">
+            <select id="val-container-select" onchange="onValidationContainerChanged()" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"></select>
+            <input type="text" id="val-container-custom" placeholder="Nom du nouveau contenant..." class="hidden w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500">
+          </div>
+        </div>
+
+        <!-- 4. Objets -->
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="text-[11px] font-medium text-slate-400">Objets détectés</label>
+            <button onclick="addValidationItemChip()" class="text-[11px] text-emerald-400 hover:underline flex items-center gap-1">
+              <i data-lucide="plus" class="w-3 h-3"></i>
+              Ajouter un objet
+            </button>
+          </div>
+          <div id="val-items-list" class="space-y-1.5 max-h-36 overflow-y-auto no-scrollbar pr-1"></div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex items-center justify-end gap-2 border-t border-slate-800 pt-3">
+        <button onclick="closeValidationModal()" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium">
+          Annuler
+        </button>
+        <button onclick="confirmAndSaveValidation()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-medium flex items-center gap-1.5 shadow-md">
+          <i data-lucide="check" class="w-3.5 h-3.5"></i>
+          <span>Confirmer et Enregistrer</span>
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- MODALES DE GESTION CRUD (INTÉGRÉES SANS PROMPT/ALERT BOX) -->
+  <!-- ===================================================================== -->
+  
+  <!-- Modale Création / Édition Pièce -->
+  <div id="modal-piece" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 id="modal-piece-title" class="text-sm font-semibold text-white">Nouvelle Pièce</h3>
+        <button onclick="closeModal('modal-piece')" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-4 h-4"></i></button>
+      </div>
+      <div>
+        <label class="block text-[11px] text-slate-400 mb-1">Nom de la pièce</label>
+        <input type="text" id="input-piece-nom" placeholder="Ex: Garage, Cave, Cuisine..." class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500">
+      </div>
+      <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+        <button onclick="closeModal('modal-piece')" class="px-3 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs">Annuler</button>
+        <button id="btn-save-piece" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-medium">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modale Création / Édition Emplacement -->
+  <div id="modal-emplacement" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 id="modal-emp-title" class="text-sm font-semibold text-white">Nouvel Emplacement</h3>
+        <button onclick="closeModal('modal-emplacement')" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-4 h-4"></i></button>
+      </div>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-[11px] text-slate-400 mb-1">Pièce parente</label>
+          <select id="select-emp-piece" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"></select>
+        </div>
+        <div>
+          <label class="block text-[11px] text-slate-400 mb-1">Nom de l'emplacement</label>
+          <input type="text" id="input-emp-nom" placeholder="Ex: Étagère métallique, Placard haut..." class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500">
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+        <button onclick="closeModal('modal-emplacement')" class="px-3 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs">Annuler</button>
+        <button id="btn-save-emp" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-medium">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modale Création / Édition Contenant -->
+  <div id="modal-contenant" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 id="modal-cont-title" class="text-sm font-semibold text-white">Nouveau Contenant</h3>
+        <button onclick="closeModal('modal-contenant')" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-4 h-4"></i></button>
+      </div>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-[11px] text-slate-400 mb-1">Emplacement parent</label>
+          <select id="select-cont-emp" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"></select>
+        </div>
+        <div>
+          <label class="block text-[11px] text-slate-400 mb-1">Nom du contenant</label>
+          <input type="text" id="input-cont-nom" placeholder="Ex: Caisse en carton Action 02, Boîte à vis..." class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500">
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+        <button onclick="closeModal('modal-contenant')" class="px-3 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs">Annuler</button>
+        <button id="btn-save-cont" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-medium">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modale Création / Édition Objet -->
+  <div id="modal-objet" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 id="modal-obj-title" class="text-sm font-semibold text-white">Ajouter un Objet</h3>
+        <button onclick="closeModal('modal-objet')" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-4 h-4"></i></button>
+      </div>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-[11px] text-slate-400 mb-1">Contenant</label>
+          <select id="select-obj-cont" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"></select>
+        </div>
+        <div>
+          <label class="block text-[11px] text-slate-400 mb-1">Nom de l'objet</label>
+          <input type="text" id="input-obj-nom" placeholder="Ex: Ruban de masquage..." class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500">
+        </div>
+        <div class="grid grid-cols-3 gap-2">
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1">Quantité</label>
+            <input type="number" id="input-obj-qte" value="1" min="0" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500">
+          </div>
+          <div class="col-span-2">
+            <label class="block text-[11px] text-slate-400 mb-1">Description (Optionnel)</label>
+            <input type="text" id="input-obj-desc" placeholder="Détails..." class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500">
+          </div>
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+        <button onclick="closeModal('modal-objet')" class="px-3 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs">Annuler</button>
+        <button id="btn-save-obj" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-medium">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modale Aide Microphone HTTP -->
+  <div id="modal-mic-help" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl text-xs text-slate-300">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-sm font-semibold text-white flex items-center gap-2">
+          <i data-lucide="info" class="w-4 h-4 text-emerald-400"></i>
+          Accès Microphone en Réseau Local HTTP
+        </h3>
+        <button onclick="closeModal('modal-mic-help')" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-4 h-4"></i></button>
+      </div>
+      <p>
+        Les navigateurs modernes (Chrome, Safari, Edge) restreignent l'API microphone (<code class="text-emerald-400">getUserMedia</code>) uniquement aux connexions <strong>HTTPS</strong> ou <strong>localhost</strong>.
+      </p>
+      <div class="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1.5 text-[11px]">
+        <strong class="text-emerald-400">Solutions disponibles immédiatement :</strong>
+        <p>1. <strong>Bouton "Dictaphone natif (Mobile HTTP)"</strong> : ouvre directement le dictaphone de votre smartphone sans restriction !</p>
+        <p>2. <strong>Autoriser Chrome/Edge en local</strong> : tapez <code class="text-emerald-400">chrome://flags/#unsafely-treat-insecure-origin-as-secure</code> dans la barre d'adresse de votre navigateur, ajoutez votre URL locale (ex: <code class="text-emerald-400">http://192.168.1.X:8088</code>), activez et relancez.</p>
+        <p>3. <strong>Saisie texte</strong> : utilisez le champ de texte classique.</p>
+      </div>
+      <div class="flex justify-end pt-2">
+        <button onclick="closeModal('modal-mic-help')" class="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-medium">Compris</button>
+      </div>
+    </div>
+  </div>
+
+  <audio id="tts-audio-player" class="hidden"></audio>
+
+  <!-- ===================================================================== -->
+  <!-- JAVASCRIPT COMPLET SANS ALERT BOX / AVEC GESTION D'ERREURS SOLIDE -->
+  <!-- ===================================================================== -->
+  <script>
+    // État
+    let currentTab = 'assistant';
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let isRecording = false;
+    let recordingInterval = null;
+    let recordingSeconds = 0;
+    let inventoryData = [];
+    let lastTTSAudioBase64 = null;
+    let activeColorTheme = 'emerald';
+    let activeColorMode = 'dark';
+
+    const THEME_PALETTES = {
+      emerald: { label: 'Émeraude', hex: '#10b981', btnClass: 'bg-emerald-600', textClass: 'text-emerald-400', borderClass: 'border-emerald-500' },
+      blue: { label: 'Bleu', hex: '#3b82f6', btnClass: 'bg-blue-600', textClass: 'text-blue-400', borderClass: 'border-blue-500' },
+      indigo: { label: 'Indigo', hex: '#6366f1', btnClass: 'bg-indigo-600', textClass: 'text-indigo-400', borderClass: 'border-indigo-500' },
+      violet: { label: 'Violet', hex: '#8b5cf6', btnClass: 'bg-violet-600', textClass: 'text-violet-400', borderClass: 'border-violet-500' },
+      amber: { label: 'Ambre', hex: '#f59e0b', btnClass: 'bg-amber-600', textClass: 'text-amber-400', borderClass: 'border-amber-500' },
+      rose: { label: 'Rose', hex: '#f43f5e', btnClass: 'bg-rose-600', textClass: 'text-rose-400', borderClass: 'border-rose-500' },
+      cyan: { label: 'Cyan', hex: '#06b6d4', btnClass: 'bg-cyan-600', textClass: 'text-cyan-400', borderClass: 'border-cyan-500' }
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      initThemeOptions();
+      loadSettings();
+      loadInventoryTree();
+    });
+
+    // -------------------------------------------------------------------------
+    // Thème & Apparence
+    // -------------------------------------------------------------------------
+    function initThemeOptions() {
+      const container = document.getElementById('theme-color-buttons');
+      container.innerHTML = '';
+      const savedTheme = localStorage.getItem('domotix_theme_color') || 'emerald';
+      const savedMode = localStorage.getItem('domotix_theme_mode') || 'dark';
+
+      Object.keys(THEME_PALETTES).forEach(key => {
+        const pal = THEME_PALETTES[key];
+        const btn = document.createElement('button');
+        btn.className = `p-2.5 rounded-xl border flex items-center gap-2 text-xs transition-colors bg-slate-950 border-slate-800 hover:border-slate-700`;
+        btn.id = `theme-btn-${key}`;
+        btn.innerHTML = `
+          <span class="w-3.5 h-3.5 rounded-full" style="background-color: ${pal.hex}"></span>
+          <span>${pal.label}</span>
+        `;
+        btn.onclick = () => setColorTheme(key);
+        container.appendChild(btn);
+      });
+
+      setColorTheme(savedTheme, false);
+      setColorMode(savedMode, false);
+    }
+
+    function setColorTheme(themeKey, toast = true) {
+      if (!THEME_PALETTES[themeKey]) return;
+      activeColorTheme = themeKey;
+      localStorage.setItem('domotix_theme_color', themeKey);
+
+      Object.keys(THEME_PALETTES).forEach(k => {
+        const btn = document.getElementById(`theme-btn-${k}`);
+        if (btn) {
+          btn.classList.toggle('border-emerald-500', k === themeKey);
+          btn.classList.toggle('bg-slate-900', k === themeKey);
+        }
+      });
+
+      if (toast) showTemporaryToast(`Thème "${THEME_PALETTES[themeKey].label}" appliqué !`, 'success');
+    }
+
+    function setColorMode(mode, toast = true) {
+      activeColorMode = mode;
+      localStorage.setItem('domotix_theme_mode', mode);
+      const isDark = mode === 'dark';
+      const body = document.getElementById('app-body');
+
+      if (isDark) {
+        body.className = "h-full flex flex-col font-sans antialiased text-slate-100 bg-slate-950 transition-colors duration-200";
+        document.getElementById('btn-mode-dark').className = "px-3 py-1.5 rounded-lg transition-colors bg-emerald-600 text-white flex items-center gap-1.5";
+        document.getElementById('btn-mode-light').className = "px-3 py-1.5 rounded-lg transition-colors text-slate-400 hover:text-slate-200 flex items-center gap-1.5";
+        document.getElementById('theme-mode-text').innerText = "Mode sombre actif";
+      } else {
+        body.className = "h-full flex flex-col font-sans antialiased text-slate-900 bg-slate-100 transition-colors duration-200";
+        document.getElementById('btn-mode-dark').className = "px-3 py-1.5 rounded-lg transition-colors text-slate-500 hover:text-slate-800 flex items-center gap-1.5";
+        document.getElementById('btn-mode-light').className = "px-3 py-1.5 rounded-lg transition-colors bg-emerald-600 text-white flex items-center gap-1.5";
+        document.getElementById('theme-mode-text').innerText = "Mode clair actif";
+      }
+
+      if (toast) showTemporaryToast(`Mode ${isDark ? 'sombre' : 'clair'} activé !`, 'success');
+    }
+
+    function switchTab(tab) {
+      currentTab = tab;
+      ['assistant', 'inventory', 'settings'].forEach(t => {
+        document.getElementById(`tab-${t}`).classList.toggle('hidden', t !== tab);
+        const btn = document.getElementById(`nav-${t}`);
+        if (t === tab) {
+          btn.className = "tab-btn px-3 py-1.5 rounded-lg transition-colors bg-emerald-600 text-white flex items-center gap-1.5";
+        } else {
+          btn.className = "tab-btn px-3 py-1.5 rounded-lg transition-colors text-slate-400 hover:text-slate-200 flex items-center gap-1.5";
+        }
+      });
+      lucide.createIcons();
+      if (tab === 'inventory') loadInventoryTree();
+    }
+
+    // -------------------------------------------------------------------------
+    // Enregistrement Audio avec détection et fallback HTTP robuste
+    // -------------------------------------------------------------------------
+    async function toggleRecording() {
+      if (isRecording) {
+        stopRecording();
+      } else {
+        startRecording();
+      }
+    }
+
+    async function startRecording() {
+      // Vérification sécurisée de la disponibilité de getUserMedia
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showTemporaryToast("Microphone bloqué en HTTP local. Utilisez le bouton Dictaphone ou la saisie texte.", "warning");
+        document.getElementById('modal-mic-help').classList.remove('hidden');
+        lucide.createIcons();
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioChunks = [];
+        mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) audioChunks.push(event.data);
+        };
+
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(audioChunks, { type: 'audio/webm' });
+          sendAudioToServer(blob);
+          stream.getTracks().forEach(track => track.stop());
+        };
+
+        mediaRecorder.start();
+        isRecording = true;
+        recordingSeconds = 0;
+
+        document.getElementById('mic-button').classList.replace('bg-emerald-600', 'bg-rose-600');
+        document.getElementById('mic-button').classList.replace('hover:bg-emerald-500', 'hover:bg-rose-500');
+        document.getElementById('mic-pulse-ring').classList.remove('hidden');
+        document.getElementById('mic-status-text').innerText = "Arrêter";
+        document.getElementById('recording-timer').innerText = "Enregistrement... 0s";
+
+        recordingInterval = setInterval(() => {
+          recordingSeconds++;
+          document.getElementById('recording-timer').innerText = `Enregistrement... ${recordingSeconds}s`;
+        }, 1000);
+
+      } catch (err) {
+        showTemporaryToast("Erreur microphone : " + (err.message || 'Permission refusée'), "error");
+      }
+    }
+
+    function stopRecording() {
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+      }
+      isRecording = false;
+      clearInterval(recordingInterval);
+
+      document.getElementById('mic-button').classList.replace('bg-rose-600', 'bg-emerald-600');
+      document.getElementById('mic-button').classList.replace('hover:bg-rose-500', 'hover:bg-emerald-500');
+      document.getElementById('mic-pulse-ring').classList.add('hidden');
+      document.getElementById('mic-status-text').innerText = "Parler";
+      document.getElementById('recording-timer').innerText = "";
+    }
+
+    function handleNativeAudioUpload(input) {
+      const file = input.files[0];
+      if (!file) return;
+      showTemporaryToast("Enregistrement reçu, analyse en cours...", "success");
+      sendAudioToServer(file);
+      input.value = "";
+    }
+
+    function showMicrophoneHelpModal() {
+      document.getElementById('modal-mic-help').classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    async function sendAudioToServer(blob) {
+      showLoading("Transcription vocale et extraction IA...");
+      const formData = new FormData();
+      formData.append("audio_file", blob, "voice.webm");
+
+      try {
+        const response = await fetch("/api/voice/process", {
+          method: "POST",
+          body: formData
+        });
+        const result = await response.json();
+        hideLoading();
+        handleProcessResult(result);
+      } catch (err) {
+        hideLoading();
+        showTemporaryToast("Erreur lors de l'envoi de l'audio : " + err.message, "error");
+      }
+    }
+
+    async function submitTextPrompt() {
+      const input = document.getElementById("text-input");
+      const text = input.value.trim();
+      if (!text) return;
+
+      input.value = "";
+      showLoading("Analyse de la phrase par Ollama...");
+
+      try {
+        const response = await fetch("/api/text/process", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text })
+        });
+        const result = await response.json();
+        hideLoading();
+        handleProcessResult(result);
+      } catch (err) {
+        hideLoading();
+        showTemporaryToast("Erreur lors de l'analyse texte : " + err.message, "error");
+      }
+    }
+
+    function handleProcessResult(res) {
+      if (!res.success && res.status !== 'pending_validation') {
+        showTemporaryToast(res.message || "Erreur de traitement", "error");
+        return;
+      }
+
+      if (res.status === 'pending_validation') {
+        openValidationModal(res.transcription, res.analysis);
+      } else if (res.status === 'saved_directly') {
+        addRecentItem(res.saved);
+        showTemporaryToast(res.message, "success");
+        loadInventoryTree();
+      } else if (res.status === 'search_result') {
+        displaySearchResults(res);
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Modale de Validation avec Cascades Intelligentes
+    // -------------------------------------------------------------------------
+    function openValidationModal(rawText, analysis) {
+      document.getElementById("val-raw-transcription").innerText = `"${rawText}"`;
+      
+      const extractedRoom = analysis.room || "Garage";
+      const extractedLoc = analysis.location || "Étagère";
+      const extractedCont = analysis.container || "Caisse";
+
+      populateValidationDropdowns(extractedRoom, extractedLoc, extractedCont);
+
+      const listContainer = document.getElementById("val-items-list");
+      listContainer.innerHTML = "";
+      (analysis.items || []).forEach(item => {
+        addItemChipInput(item);
+      });
+
+      document.getElementById("modal-validation").classList.remove("hidden");
+      lucide.createIcons();
+    }
+
+    function populateValidationDropdowns(targetRoom, targetLoc, targetCont) {
+      const roomSelect = document.getElementById("val-room-select");
+      roomSelect.innerHTML = "";
+
+      let roomFound = false;
+      inventoryData.forEach(p => {
+        const opt = document.createElement("option");
+        opt.value = p.nom;
+        opt.innerText = p.nom;
+        if (p.nom.toLowerCase() === targetRoom.toLowerCase()) {
+          opt.selected = true;
+          roomFound = true;
+        }
+        roomSelect.appendChild(opt);
+      });
+
+      const optNewRoom = document.createElement("option");
+      optNewRoom.value = "__NEW__";
+      optNewRoom.innerText = "+ Nouvelle pièce...";
+      roomSelect.appendChild(optNewRoom);
+
+      if (!roomFound && targetRoom) {
+        optNewRoom.selected = true;
+        document.getElementById("val-room-custom").classList.remove("hidden");
+        document.getElementById("val-room-custom").value = targetRoom;
+      } else {
+        document.getElementById("val-room-custom").classList.add("hidden");
+      }
+
+      onValidationRoomChanged(targetLoc, targetCont);
+    }
+
+    function onValidationRoomChanged(targetLoc = "", targetCont = "") {
+      const roomSelect = document.getElementById("val-room-select");
+      const isNewRoom = roomSelect.value === "__NEW__";
+      document.getElementById("val-room-custom").classList.toggle("hidden", !isNewRoom);
+
+      const locSelect = document.getElementById("val-location-select");
+      locSelect.innerHTML = "";
+
+      const currentRoom = inventoryData.find(p => p.nom === roomSelect.value);
+      let locFound = false;
+
+      if (currentRoom && currentRoom.emplacements) {
+        currentRoom.emplacements.forEach(e => {
+          const opt = document.createElement("option");
+          opt.value = e.nom;
+          opt.innerText = e.nom;
+          if (targetLoc && e.nom.toLowerCase() === targetLoc.toLowerCase()) {
+            opt.selected = true;
+            locFound = true;
+          }
+          locSelect.appendChild(opt);
+        });
+      }
+
+      const optNewLoc = document.createElement("option");
+      optNewLoc.value = "__NEW__";
+      optNewLoc.innerText = "+ Nouvel emplacement...";
+      locSelect.appendChild(optNewLoc);
+
+      if (!locFound && targetLoc) {
+        optNewLoc.selected = true;
+        document.getElementById("val-location-custom").classList.remove("hidden");
+        document.getElementById("val-location-custom").value = targetLoc;
+      } else if (isNewRoom) {
+        optNewLoc.selected = true;
+        document.getElementById("val-location-custom").classList.remove("hidden");
+        if (targetLoc) document.getElementById("val-location-custom").value = targetLoc;
+      } else {
+        document.getElementById("val-location-custom").classList.add("hidden");
+      }
+
+      onValidationLocationChanged(targetCont);
+    }
+
+    function onValidationLocationChanged(targetCont = "") {
+      const roomSelect = document.getElementById("val-room-select");
+      const locSelect = document.getElementById("val-location-select");
+      const isNewLoc = locSelect.value === "__NEW__";
+      document.getElementById("val-location-custom").classList.toggle("hidden", !isNewLoc);
+
+      const contSelect = document.getElementById("val-container-select");
+      contSelect.innerHTML = "";
+
+      const currentRoom = inventoryData.find(p => p.nom === roomSelect.value);
+      const currentEmp = currentRoom && currentRoom.emplacements ? currentRoom.emplacements.find(e => e.nom === locSelect.value) : null;
+      let contFound = false;
+
+      if (currentEmp && currentEmp.contenants) {
+        currentEmp.contenants.forEach(c => {
+          const opt = document.createElement("option");
+          opt.value = c.nom;
+          opt.innerText = c.nom;
+          if (targetCont && c.nom.toLowerCase() === targetCont.toLowerCase()) {
+            opt.selected = true;
+            contFound = true;
+          }
+          contSelect.appendChild(opt);
+        });
+      }
+
+      const optNewCont = document.createElement("option");
+      optNewCont.value = "__NEW__";
+      optNewCont.innerText = "+ Nouveau contenant...";
+      contSelect.appendChild(optNewCont);
+
+      if (!contFound && targetCont) {
+        optNewCont.selected = true;
+        document.getElementById("val-container-custom").classList.remove("hidden");
+        document.getElementById("val-container-custom").value = targetCont;
+      } else if (isNewLoc) {
+        optNewCont.selected = true;
+        document.getElementById("val-container-custom").classList.remove("hidden");
+        if (targetCont) document.getElementById("val-container-custom").value = targetCont;
+      } else {
+        document.getElementById("val-container-custom").classList.add("hidden");
+      }
+    }
+
+    function onValidationContainerChanged() {
+      const contSelect = document.getElementById("val-container-select");
+      const isNew = contSelect.value === "__NEW__";
+      document.getElementById("val-container-custom").classList.toggle("hidden", !isNew);
+    }
+
+    function closeValidationModal() {
+      document.getElementById("modal-validation").classList.add("hidden");
+    }
+
+    function addItemChipInput(val = "") {
+      const listContainer = document.getElementById("val-items-list");
+      const div = document.createElement("div");
+      div.className = "flex items-center gap-1.5";
+      div.innerHTML = `
+        <input type="text" value="${val}" class="val-item-input flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-500">
+        <button onclick="this.parentElement.remove()" class="p-1.5 text-slate-500 hover:text-rose-400">
+          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+        </button>
+      `;
+      listContainer.appendChild(div);
+      lucide.createIcons();
+    }
+
+    function addValidationItemChip() {
+      addItemChipInput("");
+    }
+
+    async function confirmAndSaveValidation() {
+      const roomSelect = document.getElementById("val-room-select");
+      const room = roomSelect.value === "__NEW__" ? document.getElementById("val-room-custom").value.trim() : roomSelect.value;
+
+      const locSelect = document.getElementById("val-location-select");
+      const location = locSelect.value === "__NEW__" ? document.getElementById("val-location-custom").value.trim() : locSelect.value;
+
+      const contSelect = document.getElementById("val-container-select");
+      const container = contSelect.value === "__NEW__" ? document.getElementById("val-container-custom").value.trim() : contSelect.value;
+
+      const itemInputs = document.querySelectorAll(".val-item-input");
+      const items = Array.from(itemInputs).map(inp => inp.value.trim()).filter(Boolean);
+
+      if (!room || !location || !container) {
+        showTemporaryToast("Veuillez renseigner la pièce, l'emplacement et le contenant.", "warning");
+        return;
+      }
+
+      if (items.length === 0) {
+        showTemporaryToast("Veuillez renseigner au moins un objet.", "warning");
+        return;
+      }
+
+      showLoading("Enregistrement dans l'inventaire...");
+      closeValidationModal();
+
+      try {
+        const response = await fetch("/api/inventory/confirm-add", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ room, location, container, items })
+        });
+        const result = await response.json();
+        hideLoading();
+        if (result.success) {
+          addRecentItem(result.data);
+          showTemporaryToast(result.message, "success");
+          loadInventoryTree();
+        }
+      } catch (err) {
+        hideLoading();
+        showTemporaryToast("Erreur d'enregistrement : " + err.message, "error");
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Affichage Recherche
+    // -------------------------------------------------------------------------
+    function displaySearchResults(res) {
+      const box = document.getElementById("search-result-box");
+      const textElem = document.getElementById("search-spoken-text");
+      const listElem = document.getElementById("search-matches-list");
+
+      textElem.innerText = res.spoken_message;
+      listElem.innerHTML = "";
+
+      if (res.results && res.results.length > 0) {
+        res.results.forEach(obj => {
+          const card = document.createElement("div");
+          card.className = "bg-slate-950 border border-slate-800 p-3 rounded-xl text-xs space-y-1";
+          card.innerHTML = `
+            <div class="flex items-center justify-between">
+              <span class="font-medium text-white">${obj.nom}</span>
+              <span class="text-[10px] bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded">Qté : ${obj.quantite}</span>
+            </div>
+            <div class="text-[11px] text-emerald-400 flex items-center gap-1">
+              <i data-lucide="map-pin" class="w-3 h-3"></i>
+              <span>${obj.chemin_complet}</span>
+            </div>
+          `;
+          listElem.appendChild(card);
+        });
+      }
+
+      box.classList.remove("hidden");
+      lucide.createIcons();
+
+      if (res.audio_base64) {
+        lastTTSAudioBase64 = res.audio_base64;
+        playAudioFromBase64(res.audio_base64);
+      } else if (res.spoken_message && 'speechSynthesis' in window) {
+        const utter = new SpeechSynthesisUtterance(res.spoken_message);
+        utter.lang = 'fr-FR';
+        window.speechSynthesis.speak(utter);
+      }
+    }
+
+    function playAudioFromBase64(b64) {
+      const audio = document.getElementById("tts-audio-player");
+      audio.src = `data:audio/wav;base64,${b64}`;
+      audio.play().catch(e => console.warn(e));
+    }
+
+    function replayLastTTS() {
+      if (lastTTSAudioBase64) {
+        playAudioFromBase64(lastTTSAudioBase64);
+      } else {
+        const text = document.getElementById("search-spoken-text").innerText;
+        if (text && 'speechSynthesis' in window) {
+          const utter = new SpeechSynthesisUtterance(text);
+          utter.lang = 'fr-FR';
+          window.speechSynthesis.speak(utter);
+        }
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Arborescence et Mini-Modales CRUD (100% Intégrées, sans alert/prompt)
+    // -------------------------------------------------------------------------
+    async function loadInventoryTree() {
+      try {
+        const response = await fetch("/api/inventory/tree");
+        inventoryData = await response.json();
+        renderInventoryTree(inventoryData);
+      } catch (err) {
+        console.error("Erreur chargement inventaire :", err);
+      }
+    }
+
+    function renderInventoryTree(pieces) {
+      const container = document.getElementById("inventory-tree-container");
+      if (!pieces || pieces.length === 0) {
+        container.innerHTML = `
+          <div class="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center text-slate-500 text-xs">
+            <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 text-slate-600"></i>
+            Inventaire vide. Commencez par enregistrer des objets vocalement !
+          </div>
+        `;
+        lucide.createIcons();
+        return;
+      }
+
+      container.innerHTML = "";
+      pieces.forEach(p => {
+        const pElem = document.createElement("div");
+        pElem.className = "bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3";
+        
+        pElem.innerHTML = `
+          <div class="flex items-center justify-between border-b border-slate-800/80 pb-2">
+            <div class="flex items-center gap-2">
+              <i data-lucide="home" class="w-4 h-4 text-emerald-400"></i>
+              <span class="text-sm font-semibold text-white">${p.nom}</span>
+              <span class="text-[10px] text-slate-500">(${p.emplacements ? p.emplacements.length : 0} emplacements)</span>
+            </div>
+            <div class="flex items-center gap-1">
+              <button onclick="openModalAddEmplacement(${p.id})" class="p-1 text-slate-400 hover:text-emerald-400" title="Ajouter un emplacement">
+                <i data-lucide="plus-circle" class="w-4 h-4"></i>
+              </button>
+              <button onclick="openModalEditPiece(${p.id}, '${p.nom.replace(/'/g, "\\'")}')" class="p-1 text-slate-400 hover:text-blue-400" title="Modifier la pièce">
+                <i data-lucide="edit-2" class="w-3.5 h-3.5"></i>
+              </button>
+              <button onclick="deletePiece(${p.id})" class="p-1 text-slate-400 hover:text-rose-400" title="Supprimer la pièce">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </div>
+          <div class="space-y-3 pl-2 sm:pl-4" id="emplacements-container-${p.id}"></div>
+        `;
+
+        container.appendChild(pElem);
+        const empContainer = pElem.querySelector(`#emplacements-container-${p.id}`);
+
+        if (p.emplacements && p.emplacements.length > 0) {
+          p.emplacements.forEach(emp => {
+            const empElem = document.createElement("div");
+            empElem.className = "bg-slate-950/60 border border-slate-800/80 rounded-xl p-3 space-y-2";
+            empElem.innerHTML = `
+              <div class="flex items-center justify-between border-b border-slate-800/40 pb-1.5">
+                <div class="flex items-center gap-2">
+                  <i data-lucide="map-pin" class="w-3.5 h-3.5 text-slate-400"></i>
+                  <span class="text-xs font-medium text-slate-200">${emp.nom}</span>
+                </div>
+                <div class="flex items-center gap-1">
+                  <button onclick="openModalAddContenant(${emp.id})" class="p-1 text-slate-500 hover:text-emerald-400" title="Ajouter un contenant">
+                    <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                  </button>
+                  <button onclick="openModalEditEmplacement(${emp.id}, ${p.id}, '${emp.nom.replace(/'/g, "\\'")}')" class="p-1 text-slate-500 hover:text-blue-400" title="Modifier l'emplacement">
+                    <i data-lucide="edit-2" class="w-3 h-3"></i>
+                  </button>
+                  <button onclick="deleteEmplacement(${emp.id})" class="p-1 text-slate-500 hover:text-rose-400" title="Supprimer l'emplacement">
+                    <i data-lucide="trash-2" class="w-3 h-3"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="space-y-2 pl-2" id="contenants-container-${emp.id}"></div>
+            `;
+            empContainer.appendChild(empElem);
+            const contContainer = empElem.querySelector(`#contenants-container-${emp.id}`);
+
+            if (emp.contenants && emp.contenants.length > 0) {
+              emp.contenants.forEach(cont => {
+                const contElem = document.createElement("div");
+                contElem.className = "bg-slate-900/90 border border-slate-800 rounded-lg p-2.5 space-y-2";
+                contElem.innerHTML = `
+                  <div class="flex items-center justify-between text-xs">
+                    <div class="flex items-center gap-1.5 font-medium text-emerald-300">
+                      <i data-lucide="box" class="w-3.5 h-3.5"></i>
+                      <span>${cont.nom}</span>
+                    </div>
+                    <div class="flex items-center gap-1">
+                      <button onclick="openModalAddObjet(${cont.id})" class="p-1 text-slate-400 hover:text-emerald-400" title="Ajouter un objet">
+                        <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                      </button>
+                      <button onclick="openModalEditContenant(${cont.id}, ${emp.id}, '${cont.nom.replace(/'/g, "\\'")}')" class="p-1 text-slate-400 hover:text-blue-400" title="Modifier le contenant">
+                        <i data-lucide="edit-2" class="w-3 h-3"></i>
+                      </button>
+                      <button onclick="deleteContenant(${cont.id})" class="p-1 text-slate-400 hover:text-rose-400" title="Supprimer le contenant">
+                        <i data-lucide="trash-2" class="w-3 h-3"></i>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="grid gap-1.5 sm:grid-cols-2" id="objets-container-${cont.id}"></div>
+                `;
+                contContainer.appendChild(contElem);
+                const objContainer = contElem.querySelector(`#objets-container-${cont.id}`);
+
+                if (cont.objets && cont.objets.length > 0) {
+                  cont.objets.forEach(obj => {
+                    const objElem = document.createElement("div");
+                    objElem.className = "flex items-center justify-between bg-slate-950 px-2.5 py-1.5 rounded border border-slate-800 text-[11px]";
+                    objElem.innerHTML = `
+                      <span class="text-slate-300 font-medium">${obj.nom}</span>
+                      <div class="flex items-center gap-2">
+                        <span class="text-slate-400">x${obj.quantite}</span>
+                        <button onclick="openModalEditObjet(${obj.id}, ${cont.id}, '${obj.nom.replace(/'/g, "\\'")}', ${obj.quantite}, '${(obj.description||'').replace(/'/g, "\\'")}')" class="text-slate-500 hover:text-blue-400">
+                          <i data-lucide="edit-3" class="w-3 h-3"></i>
+                        </button>
+                        <button onclick="deleteObjet(${obj.id})" class="text-slate-500 hover:text-rose-400">
+                          <i data-lucide="trash-2" class="w-3 h-3"></i>
+                        </button>
+                      </div>
+                    `;
+                    objContainer.appendChild(objElem);
+                  });
+                } else {
+                  objContainer.innerHTML = `<span class="text-[11px] text-slate-600 italic">Aucun objet</span>`;
+                }
+              });
+            } else {
+              contContainer.innerHTML = `<span class="text-[11px] text-slate-600 italic">Aucun contenant</span>`;
+            }
+          });
+        } else {
+          empContainer.innerHTML = `<span class="text-[11px] text-slate-600 italic">Aucun emplacement</span>`;
+        }
+      });
+
+      lucide.createIcons();
+    }
+
+    function closeModal(modalId) {
+      document.getElementById(modalId).classList.add("hidden");
+    }
+
+    // CRUD Pièces via Modal
+    function openModalAddPiece() {
+      document.getElementById("modal-piece-title").innerText = "Nouvelle Pièce";
+      document.getElementById("input-piece-nom").value = "";
+      document.getElementById("btn-save-piece").onclick = async () => {
+        const nom = document.getElementById("input-piece-nom").value.trim();
+        if (!nom) return;
+        const res = await fetch("/api/pieces", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nom })
+        });
+        if (res.ok) {
+          closeModal("modal-piece");
+          showTemporaryToast(`Pièce "${nom}" créée !`, "success");
+          loadInventoryTree();
+        }
+      };
+      document.getElementById("modal-piece").classList.remove("hidden");
+      lucide.createIcons();
+    }
+
+    function openModalEditPiece(pieceId, currentNom) {
+      document.getElementById("modal-piece-title").innerText = "Modifier la Pièce";
+      document.getElementById("input-piece-nom").value = currentNom;
+      document.getElementById("btn-save-piece").onclick = async () => {
+        const nom = document.getElementById("input-piece-nom").value.trim();
+        if (!nom) return;
+        const res = await fetch(`/api/pieces/${pieceId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nom })
+        });
+        if (res.ok) {
+          closeModal("modal-piece");
+          showTemporaryToast("Pièce mise à jour !", "success");
+          loadInventoryTree();
+        }
+      };
+      document.getElementById("modal-piece").classList.remove("hidden");
+      lucide.createIcons();
+    }
+
+    // CRUD Emplacements via Modal
+    function openModalAddEmplacement(selectedPieceId = null) {
+      document.getElementById("modal-emp-title").innerText = "Nouvel Emplacement";
+      document.getElementById("input-emp-nom").value = "";
+      const select = document.getElementById("select-emp-piece");
+      select.innerHTML = "";
+      inventoryData.forEach(p => {
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.innerText = p.nom;
+        if (selectedPieceId && p.id === selectedPieceId) opt.selected = true;
+        select.appendChild(opt);
+      });
+
+      document.getElementById("btn-save-emp").onclick = async () => {
+        const nom = document.getElementById("input-emp-nom").value.trim();
+        const piece_id = parseInt(select.value);
+        if (!nom || !piece_id) return;
+        const res = await fetch("/api/emplacements", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ piece_id, nom })
+        });
+        if (res.ok) {
+          closeModal("modal-emplacement");
+          showTemporaryToast(`Emplacement "${nom}" créé !`, "success");
+          loadInventoryTree();
+        }
+      };
+      document.getElementById("modal-emplacement").classList.remove("hidden");
+      lucide.createIcons();
+    }
+
+    function openModalEditEmplacement(empId, currentPieceId, currentNom) {
+      document.getElementById("modal-emp-title").innerText = "Modifier l'Emplacement";
+      document.getElementById("input-emp-nom").value = currentNom;
+      const select = document.getElementById("select-emp-piece");
+      select.innerHTML = "";
+      inventoryData.forEach(p => {
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.innerText = p.nom;
+        if (p.id === currentPieceId) opt.selected = true;
+        select.appendChild(opt);
+      });
+
+      document.getElementById("btn-save-emp").onclick = async () => {
+        const nom = document.getElementById("input-emp-nom").value.trim();
+        const piece_id = parseInt(select.value);
+        if (!nom || !piece_id) return;
+        const res = await fetch(`/api/emplacements/${empId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ piece_id, nom })
+        });
+        if (res.ok) {
+          closeModal("modal-emplacement");
+          showTemporaryToast("Emplacement mis à jour !", "success");
+          loadInventoryTree();
+        }
+      };
+      document.getElementById("modal-emplacement").classList.remove("hidden");
+      lucide.createIcons();
+    }
+
+    // CRUD Contenants via Modal
+    function openModalAddContenant(selectedEmpId = null) {
+      document.getElementById("modal-cont-title").innerText = "Nouveau Contenant";
+      document.getElementById("input-cont-nom").value = "";
+      const select = document.getElementById("select-cont-emp");
+      select.innerHTML = "";
+      inventoryData.forEach(p => {
+        (p.emplacements || []).forEach(e => {
+          const opt = document.createElement("option");
+          opt.value = e.id;
+          opt.innerText = `${p.nom} > ${e.nom}`;
+          if (selectedEmpId && e.id === selectedEmpId) opt.selected = true;
+          select.appendChild(opt);
+        });
+      });
+
+      document.getElementById("btn-save-cont").onclick = async () => {
+        const nom = document.getElementById("input-cont-nom").value.trim();
+        const emplacement_id = parseInt(select.value);
+        if (!nom || !emplacement_id) return;
+        const res = await fetch("/api/contenants", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ emplacement_id, nom })
+        });
+        if (res.ok) {
+          closeModal("modal-contenant");
+          showTemporaryToast(`Contenant "${nom}" créé !`, "success");
+          loadInventoryTree();
+        }
+      };
+      document.getElementById("modal-contenant").classList.remove("hidden");
+      lucide.createIcons();
+    }
+
+    function openModalEditContenant(contId, currentEmpId, currentNom) {
+      document.getElementById("modal-cont-title").innerText = "Modifier le Contenant";
+      document.getElementById("input-cont-nom").value = currentNom;
+      const select = document.getElementById("select-cont-emp");
+      select.innerHTML = "";
+      inventoryData.forEach(p => {
+        (p.emplacements || []).forEach(e => {
+          const opt = document.createElement("option");
+          opt.value = e.id;
+          opt.innerText = `${p.nom} > ${e.nom}`;
+          if (e.id === currentEmpId) opt.selected = true;
+          select.appendChild(opt);
+        });
+      });
+
+      document.getElementById("btn-save-cont").onclick = async () => {
+        const nom = document.getElementById("input-cont-nom").value.trim();
+        const emplacement_id = parseInt(select.value);
+        if (!nom || !emplacement_id) return;
+        const res = await fetch(`/api/contenants/${contId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ emplacement_id, nom })
+        });
+        if (res.ok) {
+          closeModal("modal-contenant");
+          showTemporaryToast("Contenant mis à jour !", "success");
+          loadInventoryTree();
+        }
+      };
+      document.getElementById("modal-contenant").classList.remove("hidden");
+      lucide.createIcons();
+    }
+
+    // CRUD Objets via Modal
+    function openModalAddObjet(selectedContId = null) {
+      document.getElementById("modal-obj-title").innerText = "Ajouter un Objet";
+      document.getElementById("input-obj-nom").value = "";
+      document.getElementById("input-obj-qte").value = "1";
+      document.getElementById("input-obj-desc").value = "";
+      const select = document.getElementById("select-obj-cont");
+      select.innerHTML = "";
+      inventoryData.forEach(p => {
+        (p.emplacements || []).forEach(e => {
+          (e.contenants || []).forEach(c => {
+            const opt = document.createElement("option");
+            opt.value = c.id;
+            opt.innerText = `${p.nom} > ${e.nom} > ${c.nom}`;
+            if (selectedContId && c.id === selectedContId) opt.selected = true;
+            select.appendChild(opt);
+          });
+        });
+      });
+
+      document.getElementById("btn-save-obj").onclick = async () => {
+        const nom = document.getElementById("input-obj-nom").value.trim();
+        const quantite = parseInt(document.getElementById("input-obj-qte").value) || 1;
+        const description = document.getElementById("input-obj-desc").value.trim();
+        const contenant_id = parseInt(select.value);
+        if (!nom || !contenant_id) return;
+
+        const res = await fetch("/api/objets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contenant_id, nom, quantite, description })
+        });
+        if (res.ok) {
+          closeModal("modal-objet");
+          showTemporaryToast(`Objet "${nom}" ajouté !`, "success");
+          loadInventoryTree();
+        }
+      };
+      document.getElementById("modal-objet").classList.remove("hidden");
+      lucide.createIcons();
+    }
+
+    function openModalEditObjet(objId, currentContId, currentNom, currentQte, currentDesc) {
+      document.getElementById("modal-obj-title").innerText = "Modifier l'Objet";
+      document.getElementById("input-obj-nom").value = currentNom;
+      document.getElementById("input-obj-qte").value = currentQte;
+      document.getElementById("input-obj-desc").value = currentDesc;
+      const select = document.getElementById("select-obj-cont");
+      select.innerHTML = "";
+      inventoryData.forEach(p => {
+        (p.emplacements || []).forEach(e => {
+          (e.contenants || []).forEach(c => {
+            const opt = document.createElement("option");
+            opt.value = c.id;
+            opt.innerText = `${p.nom} > ${e.nom} > ${c.nom}`;
+            if (c.id === currentContId) opt.selected = true;
+            select.appendChild(opt);
+          });
+        });
+      });
+
+      document.getElementById("btn-save-obj").onclick = async () => {
+        const nom = document.getElementById("input-obj-nom").value.trim();
+        const quantite = parseInt(document.getElementById("input-obj-qte").value) || 0;
+        const description = document.getElementById("input-obj-desc").value.trim();
+        const contenant_id = parseInt(select.value);
+        if (!nom || !contenant_id) return;
+
+        const res = await fetch(`/api/objets/${objId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contenant_id, nom, quantite, description })
+        });
+        if (res.ok) {
+          closeModal("modal-objet");
+          showTemporaryToast("Objet mis à jour !", "success");
+          loadInventoryTree();
+        }
+      };
+      document.getElementById("modal-objet").classList.remove("hidden");
+      lucide.createIcons();
+    }
+
+    async function deletePiece(id) {
+      if (confirm("Supprimer cette pièce et tout son contenu ?")) {
+        await fetch(`/api/pieces/${id}`, { method: "DELETE" });
+        showTemporaryToast("Pièce supprimée", "success");
+        loadInventoryTree();
+      }
+    }
+    async function deleteEmplacement(id) {
+      if (confirm("Supprimer cet emplacement et son contenu ?")) {
+        await fetch(`/api/emplacements/${id}`, { method: "DELETE" });
+        showTemporaryToast("Emplacement supprimé", "success");
+        loadInventoryTree();
+      }
+    }
+    async function deleteContenant(id) {
+      if (confirm("Supprimer ce contenant et tous ses objets ?")) {
+        await fetch(`/api/contenants/${id}`, { method: "DELETE" });
+        showTemporaryToast("Contenant supprimé", "success");
+        loadInventoryTree();
+      }
+    }
+    async function deleteObjet(id) {
+      if (confirm("Supprimer cet objet ?")) {
+        await fetch(`/api/objets/${id}`, { method: "DELETE" });
+        showTemporaryToast("Objet supprimé", "success");
+        loadInventoryTree();
+      }
+    }
+
+    function filterInventory(q) {
+      if (!q.trim()) {
+        renderInventoryTree(inventoryData);
+        return;
+      }
+      const term = q.toLowerCase();
+      const filtered = inventoryData.map(p => {
+        const matchesP = p.nom.toLowerCase().includes(term);
+        const filteredE = (p.emplacements || []).map(e => {
+          const matchesE = e.nom.toLowerCase().includes(term);
+          const filteredC = (e.contenants || []).map(c => {
+            const matchesC = c.nom.toLowerCase().includes(term);
+            const filteredO = (c.objets || []).filter(o => 
+              o.nom.toLowerCase().includes(term) || (o.description && o.description.toLowerCase().includes(term))
+            );
+            if (matchesC || filteredO.length > 0) return { ...c, objets: matchesC ? c.objets : filteredO };
+            return null;
+          }).filter(Boolean);
+          if (matchesE || filteredC.length > 0) return { ...e, contenants: matchesE ? e.contenants : filteredC };
+          return null;
+        }).filter(Boolean);
+        if (matchesP || filteredE.length > 0) return { ...p, emplacements: matchesP ? p.emplacements : filteredE };
+        return null;
+      }).filter(Boolean);
+      renderInventoryTree(filtered);
+    }
+
+    // -------------------------------------------------------------------------
+    // Paramètres et Diagnostics
+    // -------------------------------------------------------------------------
+    async function loadSettings() {
+      try {
+        const res = await fetch("/api/settings");
+        const cfg = await res.json();
+        document.getElementById("cfg-ollama-url").value = cfg.ollama_url || "http://ollama:11434";
+        document.getElementById("cfg-whisper-url").value = cfg.whisper_url || "http://faster-whisper:9000";
+        document.getElementById("cfg-piper-url").value = cfg.piper_url || "http://piper:5000";
+        document.getElementById("cfg-require-validation").checked = cfg.require_validation;
+        
+        const sel = document.getElementById("cfg-ollama-model");
+        sel.value = cfg.ollama_model || "gemma3:4b";
+      } catch (e) {
+        console.error("Erreur chargement réglages :", e);
+      }
+    }
+
+    async function saveSettings() {
+      const payload = {
+        ollama_url: document.getElementById("cfg-ollama-url").value.trim(),
+        whisper_url: document.getElementById("cfg-whisper-url").value.trim(),
+        piper_url: document.getElementById("cfg-piper-url").value.trim(),
+        ollama_model: document.getElementById("cfg-ollama-model").value,
+        require_validation: document.getElementById("cfg-require-validation").checked
+      };
+
+      try {
+        const res = await fetch("/api/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+          showTemporaryToast("Réglages enregistrés avec succès !", "success");
+        }
+      } catch (e) {
+        showTemporaryToast("Erreur d'enregistrement : " + e.message, "error");
+      }
+    }
+
+    async function testService(service) {
+      const badge = document.getElementById(`badge-${service}`);
+      badge.className = "w-2 h-2 rounded-full bg-amber-400 animate-ping";
+
+      let typedUrl = "";
+      if (service === "ollama") typedUrl = document.getElementById("cfg-ollama-url").value.trim();
+      if (service === "whisper") typedUrl = document.getElementById("cfg-whisper-url").value.trim();
+      if (service === "piper") typedUrl = document.getElementById("cfg-piper-url").value.trim();
+
+      try {
+        const res = await fetch(`/api/test/${service}?url=${encodeURIComponent(typedUrl)}`);
+        const data = await res.json();
+
+        if (data.success) {
+          badge.className = "w-2 h-2 rounded-full bg-emerald-500";
+          showTemporaryToast(data.message || `Service ${service} connecté avec succès !`, "success");
+
+          // Si Ollama a renvoyé des modèles, mettre à jour la liste
+          if (service === "ollama" && data.models && data.models.length > 0) {
+            updateModelDropdown(data.models);
+          }
+        } else {
+          badge.className = "w-2 h-2 rounded-full bg-rose-500";
+          showTemporaryToast(data.message || `Impossible de joindre ${service}`, "error");
+        }
+      } catch (e) {
+        badge.className = "w-2 h-2 rounded-full bg-rose-500";
+        showTemporaryToast("Erreur réseau lors du test de " + service, "error");
+      }
+    }
+
+    function updateModelDropdown(modelsList) {
+      const sel = document.getElementById("cfg-ollama-model");
+      const current = sel.value;
+      sel.innerHTML = "";
+      modelsList.forEach(m => {
+        const opt = document.createElement("option");
+        opt.value = m;
+        opt.innerText = m;
+        sel.appendChild(opt);
+      });
+      sel.value = modelsList.includes(current) ? current : modelsList[0];
+    }
+
+    async function refreshOllamaModels() {
+      const typedUrl = document.getElementById("cfg-ollama-url").value.trim();
+      try {
+        const res = await fetch(`/api/ollama/models?url=${encodeURIComponent(typedUrl)}`);
+        const data = await res.json();
+        if (data.models && data.models.length > 0) {
+          updateModelDropdown(data.models);
+          showTemporaryToast(`${data.models.length} modèles détectés sur Ollama !`, "success");
+        } else {
+          showTemporaryToast("Aucun modèle détecté sur " + typedUrl, "warning");
+        }
+      } catch (e) {
+        showTemporaryToast("Erreur récupération modèles : " + e.message, "error");
+      }
+    }
+
+    async function uploadImportFile(input, format) {
+      const file = input.files[0];
+      if (!file) return;
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      showLoading(`Importation du fichier ${format.toUpperCase()}...`);
+      try {
+        const res = await fetch(`/api/import/${format}`, {
+          method: "POST",
+          body: formData
+        });
+        const result = await res.json();
+        hideLoading();
+        if (result.success) {
+          showTemporaryToast(result.message, "success");
+          loadInventoryTree();
+        } else {
+          showTemporaryToast("Erreur d'import : " + (result.detail || "Fichier invalide"), "error");
+        }
+      } catch (e) {
+        hideLoading();
+        showTemporaryToast("Erreur réseau : " + e.message, "error");
+      }
+      input.value = "";
+    }
+
+    function showLoading(msg) {
+      document.getElementById("loading-message").innerText = msg;
+      document.getElementById("loading-indicator").classList.remove("hidden");
+    }
+
+    function hideLoading() {
+      document.getElementById("loading-indicator").classList.add("hidden");
+    }
+
+    function addRecentItem(saved) {
+      const c = document.getElementById("recent-items-container");
+      if (c.querySelector("p.italic")) c.innerHTML = "";
+
+      const div = document.createElement("div");
+      div.className = "bg-slate-900 border border-slate-800 p-3 rounded-xl flex items-center justify-between";
+      const itemNames = (saved.items || []).map(i => i.nom).join(", ");
+      div.innerHTML = `
+        <div>
+          <span class="font-medium text-white">${itemNames}</span>
+          <p class="text-[11px] text-slate-400">${saved.piece.nom} > ${saved.emplacement.nom} > ${saved.contenant.nom}</p>
+        </div>
+        <span class="text-[10px] text-emerald-400 bg-emerald-950 px-2 py-0.5 rounded border border-emerald-800">Ajouté</span>
+      `;
+      c.prepend(div);
+    }
+
+    // Toasts en 3 couleurs : Vert (success), Rouge (error), Orange (warning)
+    function showTemporaryToast(msg, type = 'success') {
+      const toast = document.createElement("div");
+      let bgClass = "bg-emerald-600 border-emerald-400";
+      let icon = "check-circle";
+
+      if (type === 'error') {
+        bgClass = "bg-rose-600 border-rose-400";
+        icon = "alert-circle";
+      } else if (type === 'warning') {
+        bgClass = "bg-amber-600 border-amber-400";
+        icon = "alert-triangle";
+      }
+
+      toast.className = `fixed bottom-5 right-5 z-50 ${bgClass} border text-white px-4 py-2.5 rounded-xl text-xs font-medium shadow-2xl flex items-center gap-2 transition-all transform translate-y-2 opacity-0`;
+      toast.innerHTML = `<i data-lucide="${icon}" class="w-4 h-4"></i><span>${msg}</span>`;
+      document.body.appendChild(toast);
+      lucide.createIcons();
+      setTimeout(() => {
+        toast.classList.remove("translate-y-2", "opacity-0");
+      }, 50);
+      setTimeout(() => {
+        toast.classList.add("translate-y-2", "opacity-0");
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+  </script>
+</body>
+</html>

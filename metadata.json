@@ -1,0 +1,6 @@
+{
+  "name": "Domotix - Inventaire Domotique Vocal ZimaOS",
+  "description": "Application locale d'inventaire domotique intelligente par commande vocale (Whisper, Ollama, Piper) sous ZimaOS et Docker.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

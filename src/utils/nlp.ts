@@ -136,18 +136,76 @@ Phrase : "${text}"`,
   return parseNaturalLanguageText(text);
 }
 
-export function speakTextWebAudio(text: string) {
-  if (!('speechSynthesis' in window)) return;
+export function getAvailableBrowserVoices(): SpeechSynthesisVoice[] {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return [];
+  const voices = window.speechSynthesis.getVoices();
+  return voices.filter((v) => v.lang.startsWith('fr') || v.lang.startsWith('en'));
+}
+
+export function speakTextWebAudio(text: string, voiceName?: string, speed = 1.0) {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
   window.speechSynthesis.cancel();
   const utter = new SpeechSynthesisUtterance(text);
   utter.lang = 'fr-FR';
-  utter.rate = 1.0;
+  utter.rate = Math.max(0.5, Math.min(2.0, speed || 1.0));
   utter.pitch = 1.0;
 
-  // Tenter de trouver une voix française naturelle
   const voices = window.speechSynthesis.getVoices();
-  const frVoice = voices.find((v) => v.lang.startsWith('fr') && !v.name.includes('Google'));
-  if (frVoice) utter.voice = frVoice;
+  if (voiceName) {
+    const selected = voices.find((v) => v.name === voiceName || v.voiceURI === voiceName);
+    if (selected) utter.voice = selected;
+  } else {
+    // Tenter de trouver une voix française naturelle
+    const frVoice = voices.find((v) => v.lang.startsWith('fr') && !v.name.includes('Google'));
+    if (frVoice) utter.voice = frVoice;
+  }
 
   window.speechSynthesis.speak(utter);
+}
+
+export async function playPiperTTS(text: string, piperUrl?: string, voice?: string): Promise<boolean> {
+  if (!text || !text.trim()) return false;
+  try {
+    // Tente via le proxy backend /api/tts/speak s'il existe
+    const res = await fetch('/api/tts/speak', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voice }),
+    });
+
+    if (res.ok) {
+      const blob = await res.blob();
+      const audioUrl = URL.createObjectURL(blob);
+      const audio = new Audio(audioUrl);
+      await audio.play();
+      return true;
+    }
+  } catch (err) {
+    console.warn('Echec appel /api/tts/speak, tentative fallback direct Piper ou Web Audio', err);
+  }
+
+  // Tente direct si piperUrl est fourni
+  if (piperUrl) {
+    try {
+      const endpoint = `${piperUrl.replace(/\/+$/, '')}/api/tts`;
+      const res2 = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice }),
+      });
+      if (res2.ok) {
+        const blob = await res2.blob();
+        const audioUrl = URL.createObjectURL(blob);
+        const audio = new Audio(audioUrl);
+        await audio.play();
+        return true;
+      }
+    } catch {
+      // Piper direct échoué
+    }
+  }
+
+  // Fallback synthèse du navigateur
+  speakTextWebAudio(text, undefined, 1.0);
+  return true;
 }

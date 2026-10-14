@@ -102,22 +102,78 @@ def transcribe_audio(audio_bytes: bytes, filename: str = "recording.webm", whisp
     return ""
 
 
-def synthesize_speech(text: str, piper_url: str = "http://piper:5000") -> Optional[bytes]:
+
+def list_piper_voices(piper_url: str = "http://piper:5000") -> list:
+    """
+    Récupère la liste des voix disponibles auprès du serveur Piper-TTS.
+    Si le serveur ne renvoie pas de liste détaillée, retourne les modèles français recommandés.
+    """
+    default_french_voices = [
+        {"id": "fr_FR-siwis-medium", "name": "Siwis (Femme, Studio Medium)", "lang": "fr_FR", "quality": "medium"},
+        {"id": "fr_FR-upmc-medium", "name": "UPMC (Homme, Clair & Posé)", "lang": "fr_FR", "quality": "medium"},
+        {"id": "fr_FR-siwis-low", "name": "Siwis (Femme, Rapide & Léger)", "lang": "fr_FR", "quality": "low"},
+        {"id": "fr_FR-gilles-low", "name": "Gilles (Homme, Standard)", "lang": "fr_FR", "quality": "low"},
+        {"id": "fr_FR-mls-medium", "name": "MLS (Homme, Studio Medium)", "lang": "fr_FR", "quality": "medium"},
+    ]
+
+    if not piper_url:
+        return default_french_voices
+
+    cleaned = piper_url.strip().rstrip("/")
+    candidates = [cleaned]
+    if "localhost" in cleaned or "127.0.0.1" in cleaned:
+        candidates.append(cleaned.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal"))
+
+    for base in candidates:
+        for path in ["/voices", "/api/voices"]:
+            try:
+                r = requests.get(f"{base}{path}", timeout=3)
+                if r.status_code == 200:
+                    data = r.json()
+                    voices = []
+                    if isinstance(data, dict):
+                        for k, v in data.items():
+                            name = v.get("name", k) if isinstance(v, dict) else str(k)
+                            lang = v.get("language", {}).get("code", "") if isinstance(v, dict) and isinstance(v.get("language"), dict) else ""
+                            voices.append({"id": k, "name": f"{name} ({lang})" if lang else name, "lang": lang})
+                    elif isinstance(data, list):
+                        for item in data:
+                            if isinstance(item, dict):
+                                voices.append({
+                                    "id": item.get("key") or item.get("id") or item.get("name"),
+                                    "name": item.get("name") or item.get("id"),
+                                    "lang": item.get("language") or "fr"
+                                })
+                            elif isinstance(item, str):
+                                voices.append({"id": item, "name": item, "lang": "fr"})
+                    if voices:
+                        return voices
+            except Exception:
+                continue
+
+    return default_french_voices
+
+
+def synthesize_speech(text: str, piper_url: str = "http://piper:5000", voice: Optional[str] = None) -> Optional[bytes]:
     """
     Envoie le texte à Piper-TTS et renvoie le flux audio WAV brut.
-    Gère les endpoints classiques des serveurs HTTP Piper (GET/POST /?text=, /tts, /api/tts).
+    Prend en compte le modèle de voix demandé (ex: fr_FR-siwis-medium).
     """
     if not text or not text.strip():
         return None
 
     base = piper_url.rstrip("/")
+    payload: Dict[str, Any] = {"text": text.strip()}
+    if voice:
+        payload["voice"] = voice
+        payload["speaker_id"] = 0
 
-    # Essai 1: POST /tts ou /api/tts avec JSON
+    # Essai 1: POST /tts ou /api/tts ou / avec JSON
     for path in ["/tts", "/api/tts", "/"]:
         try:
             res = requests.post(
                 f"{base}{path}",
-                json={"text": text.strip()},
+                json=payload,
                 headers={"Content-Type": "application/json"},
                 timeout=15
             )
@@ -126,12 +182,16 @@ def synthesize_speech(text: str, piper_url: str = "http://piper:5000") -> Option
         except Exception:
             pass
 
-    # Essai 2: GET /?text=...
+    # Essai 2: GET /?text=...&voice=...
     try:
-        res = requests.get(f"{base}/", params={"text": text.strip()}, timeout=15)
+        params = {"text": text.strip()}
+        if voice:
+            params["voice"] = voice
+        res = requests.get(f"{base}/", params=params, timeout=15)
         if res.status_code == 200 and len(res.content) > 100:
             return res.content
     except Exception:
         pass
 
     return None
+

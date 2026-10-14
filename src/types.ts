@@ -39,6 +39,10 @@ export interface AppSettings {
   whisper_url: string;
   piper_url: string;
   ollama_model: string;
+  piper_voice?: string;
+  tts_engine?: 'piper' | 'browser' | 'auto';
+  browser_voice?: string;
+  tts_speed?: number;
   require_validation: boolean;
   theme_color: ThemeColor;
   color_mode: ColorMode;

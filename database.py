@@ -53,6 +53,7 @@ def init_db():
         "whisper_url": os.getenv("WHISPER_URL", "http://faster-whisper:9000"),
         "piper_url": os.getenv("PIPER_URL", "http://piper:5000"),
         "ollama_model": os.getenv("DEFAULT_OLLAMA_MODEL", "gemma3:4b"),
+        "piper_voice": os.getenv("DEFAULT_PIPER_VOICE", "fr_FR-siwis-medium"),
         "require_validation": "true",  # "true" ou "false"
     }
 

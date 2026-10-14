@@ -21,10 +21,12 @@ from models import Piece, Emplacement, Contenant, Objet, Configuration
 import ollama_service
 import speech_service
 
+APP_VERSION = "1.3.0"
+
 app = FastAPI(
     title="Domotix - Inventaire Domotique Vocal",
     description="Application locale d'inventaire intelligent sous ZimaOS via Docker",
-    version="1.0.0"
+    version=APP_VERSION
 )
 
 # Configuration CORS pour réseau local ZimaOS
@@ -62,10 +64,12 @@ class SettingsUpdateRequest(BaseModel):
     whisper_url: Optional[str] = None
     piper_url: Optional[str] = None
     ollama_model: Optional[str] = None
+    piper_voice: Optional[str] = None
     require_validation: Optional[bool] = None
 
 class TTSRequest(BaseModel):
     text: str
+    voice: Optional[str] = None
 
 class PieceCreate(BaseModel):
     nom: str
@@ -238,6 +242,7 @@ async def process_voice(
     whisper_url = get_setting_value(db, "whisper_url", "http://faster-whisper:9000")
     ollama_url = get_setting_value(db, "ollama_url", "http://ollama:11434")
     piper_url = get_setting_value(db, "piper_url", "http://piper:5000")
+    piper_voice = get_setting_value(db, "piper_voice", "fr_FR-siwis-medium")
     ollama_model = get_setting_value(db, "ollama_model", "gemma3:4b")
     require_validation = get_setting_value(db, "require_validation", "true").lower() == "true"
 
@@ -287,7 +292,7 @@ async def process_voice(
         results, spoken_message = perform_search(db, items_to_search)
 
         # Générer l'audio avec Piper-TTS
-        audio_wav = speech_service.synthesize_speech(spoken_message, piper_url)
+        audio_wav = speech_service.synthesize_speech(spoken_message, piper_url, voice=piper_voice)
         audio_b64 = base64.b64encode(audio_wav).decode("utf-8") if audio_wav else None
 
         return {
@@ -320,6 +325,7 @@ def process_text(
 
     ollama_url = get_setting_value(db, "ollama_url", "http://ollama:11434")
     piper_url = get_setting_value(db, "piper_url", "http://piper:5000")
+    piper_voice = get_setting_value(db, "piper_voice", "fr_FR-siwis-medium")
     ollama_model = get_setting_value(db, "ollama_model", "gemma3:4b")
     require_validation = get_setting_value(db, "require_validation", "true").lower() == "true"
 
@@ -356,7 +362,7 @@ def process_text(
         items_to_search = analysis.get("items", [])
         results, spoken_message = perform_search(db, items_to_search)
 
-        audio_wav = speech_service.synthesize_speech(spoken_message, piper_url)
+        audio_wav = speech_service.synthesize_speech(spoken_message, piper_url, voice=piper_voice)
         audio_b64 = base64.b64encode(audio_wav).decode("utf-8") if audio_wav else None
 
         return {
@@ -404,7 +410,8 @@ def confirm_add_inventory(
 @app.post("/api/tts/speak")
 def tts_speak(payload: TTSRequest, db: Session = Depends(get_db)):
     piper_url = get_setting_value(db, "piper_url", "http://piper:5000")
-    audio = speech_service.synthesize_speech(payload.text, piper_url)
+    voice = payload.voice or get_setting_value(db, "piper_voice", "fr_FR-siwis-medium")
+    audio = speech_service.synthesize_speech(payload.text, piper_url, voice=voice)
     if audio:
         return Response(content=audio, media_type="audio/wav")
     raise HTTPException(status_code=502, detail="Piper-TTS n'a pas répondu ou indisponible")
@@ -566,16 +573,40 @@ def delete_objet(obj_id: int, db: Session = Depends(get_db)):
 # Paramètres & Diagnostics Réseau
 # =============================================================================
 
+@app.get("/api/version")
+def get_version():
+    return {
+        "version": APP_VERSION,
+        "app": "Domotix",
+        "description": "Inventaire Domotique Vocal & Sémantique",
+        "status": "ready",
+        "time": datetime.utcnow().isoformat()
+    }
+
 @app.get("/api/settings")
 def get_settings(db: Session = Depends(get_db)):
     configs = db.query(Configuration).all()
     res = {c.cle: c.valeur for c in configs}
     return {
+        "version": APP_VERSION,
         "ollama_url": res.get("ollama_url", "http://ollama:11434"),
         "whisper_url": res.get("whisper_url", "http://faster-whisper:9000"),
         "piper_url": res.get("piper_url", "http://piper:5000"),
         "ollama_model": res.get("ollama_model", "gemma3:4b"),
+        "piper_voice": res.get("piper_voice", "fr_FR-siwis-medium"),
         "require_validation": res.get("require_validation", "true").lower() == "true",
+        "docker_env": {
+            "ollama_url": database.os.getenv("OLLAMA_URL", "http://ollama:11434"),
+            "whisper_url": database.os.getenv("WHISPER_URL", "http://faster-whisper:9000"),
+            "piper_url": database.os.getenv("PIPER_URL", "http://piper:5000"),
+            "ollama_model": database.os.getenv("DEFAULT_OLLAMA_MODEL", "gemma3:4b"),
+            "piper_voice": database.os.getenv("DEFAULT_PIPER_VOICE", "fr_FR-siwis-medium"),
+        },
+        "priority_info": {
+            "active_priority": "Base de données SQLite (Modifications dans l'interface)",
+            "initial_priority": "Variables d'environnement docker-compose.yml",
+            "explanation": "Les réglages modifiés dans l'interface ont la priorité active absolue (sauvegardés dans /data/inventory.db). Les variables de docker-compose.yml sont utilisées à la première installation et peuvent être restaurées d'un clic."
+        }
     }
 
 @app.post("/api/settings")
@@ -588,9 +619,38 @@ def update_settings(payload: SettingsUpdateRequest, db: Session = Depends(get_db
         set_setting_value(db, "piper_url", payload.piper_url.strip())
     if payload.ollama_model is not None:
         set_setting_value(db, "ollama_model", payload.ollama_model.strip())
+    if payload.piper_voice is not None:
+        set_setting_value(db, "piper_voice", payload.piper_voice.strip())
     if payload.require_validation is not None:
         set_setting_value(db, "require_validation", "true" if payload.require_validation else "false")
-    return {"success": True, "message": "Paramètres sauvegardés"}
+    return {"success": True, "message": "Paramètres sauvegardés avec succès !"}
+
+@app.post("/api/settings/sync-docker")
+def sync_docker_settings(db: Session = Depends(get_db)):
+    """Réinitialise les paramètres en base avec les valeurs actuelles des variables d'environnement Docker."""
+    env_ollama = database.os.getenv("OLLAMA_URL", "http://ollama:11434")
+    env_whisper = database.os.getenv("WHISPER_URL", "http://faster-whisper:9000")
+    env_piper = database.os.getenv("PIPER_URL", "http://piper:5000")
+    env_model = database.os.getenv("DEFAULT_OLLAMA_MODEL", "gemma3:4b")
+    env_voice = database.os.getenv("DEFAULT_PIPER_VOICE", "fr_FR-siwis-medium")
+
+    set_setting_value(db, "ollama_url", env_ollama)
+    set_setting_value(db, "whisper_url", env_whisper)
+    set_setting_value(db, "piper_url", env_piper)
+    set_setting_value(db, "ollama_model", env_model)
+    set_setting_value(db, "piper_voice", env_voice)
+
+    return {
+        "success": True,
+        "message": "Paramètres synchronisés avec les variables d'environnement de docker-compose.yml !",
+        "settings": {
+            "ollama_url": env_ollama,
+            "whisper_url": env_whisper,
+            "piper_url": env_piper,
+            "ollama_model": env_model,
+            "piper_voice": env_voice,
+        }
+    }
 
 @app.get("/api/test/ollama")
 def test_ollama(url: Optional[str] = Query(None), db: Session = Depends(get_db)):
@@ -606,6 +666,12 @@ def test_whisper(url: Optional[str] = Query(None), db: Session = Depends(get_db)
 def test_piper(url: Optional[str] = Query(None), db: Session = Depends(get_db)):
     target_url = url.strip() if url and url.strip() else get_setting_value(db, "piper_url", "http://piper:5000")
     return speech_service.test_piper_connection(target_url)
+
+@app.get("/api/piper/voices")
+def get_piper_voices(url: Optional[str] = Query(None), db: Session = Depends(get_db)):
+    target_url = url.strip() if url and url.strip() else get_setting_value(db, "piper_url", "http://piper:5000")
+    voices_list = speech_service.list_piper_voices(target_url)
+    return {"voices": voices_list, "success": len(voices_list) > 0, "url": target_url}
 
 @app.get("/api/ollama/models")
 def get_ollama_models(url: Optional[str] = Query(None), db: Session = Depends(get_db)):

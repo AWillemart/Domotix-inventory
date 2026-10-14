@@ -1,87 +1,144 @@
-# 📦 Domotix - Inventaire Domotique Vocal Intelligent pour ZimaOS
+# 📦 Domotix - Déploiement Local & Serveur ZimaOS
 
-Application locale d'inventaire domotique intelligente par commande vocale (Faster-Whisper, Ollama avec modèles comme `gemma3:4b`, et Piper-TTS), stockée dans une base **SQLite** persistante et exécutable sous **ZimaOS** via **Docker**.
-
----
-
-## 🏗️ Architecture & Composants
-
-1. **Backend** : Python 3.11 avec FastAPI, Uvicorn et SQLAlchemy.
-2. **Base de données** : SQLite local avec mode WAL (`/data/inventory.db`) persistant dans un volume Docker.
-3. **Frontend** : Single Page Application (SPA) responsive mobile-first (HTML5, TailwindCSS, Lucide Icons, Web Audio API).
-4. **Services d'IA Locaux** :
-   - **Ollama API** (`http://ollama:11434` ou `http://host.docker.internal:11434`) : Extraction sémantique structurée au format JSON (Pièce, Emplacement, Contenant, Objets). Modèles supportés : `gemma3:4b`, `llama3:8b`, `mistral`, etc.
-   - **Faster-Whisper API** (`http://faster-whisper:9000`) : Retranscription vocale (Speech-to-Text).
-   - **Piper-TTS API** (`http://piper:5000`) : Synthèse vocale française (Text-to-Speech) pour la lecture des résultats de recherche.
+Ce guide vous explique pas à pas comment déployer **Domotix** sur votre serveur local (ZimaOS, CasaOS, Linux, Raspberry Pi, NAS) maintenant que votre compte **GitHub** est relié.
 
 ---
 
-## 🚀 Déploiement rapide sous ZimaOS
+## ⚡ En résumé : Vos 3 options de déploiement
 
-### Méthode 1 : Via l'interface ZimaOS (Custom App)
-1. Ouvrez votre tableau de bord **ZimaOS**.
-2. Cliquez sur **App Store** > **Custom Install** (ou **Installer une application personnalisée**).
-3. Collez le contenu de `docker-compose.yml` ou configurez le conteneur :
-   - Image : construite localement ou `domotix:latest`
-   - Ports : `8000:8000`
-   - Volumes : `/DATA/AppData/domotix/data:/data`
-4. Cliquez sur **Démarrer**.
+| Option | Idéal pour | Commande principale |
+| :--- | :--- | :--- |
+| **Option 1 : Image Docker (GHCR)** 🚀 | Déploiement instantané sans compiler sur le serveur | `docker compose pull && docker compose up -d` |
+| **Option 2 : Dépôt Git direct** 🛠️ | Tests, modifications locales et mises à jour via `git pull` | `./start.sh` ou `docker compose up -d --build` |
+| **Option 3 : Interface ZimaOS (UI)** 🖥️ | Installation sans passer par le terminal SSH | Bouton **"Custom App"** / Importer compose |
 
-### Méthode 2 : En ligne de commande SSH sous ZimaOS
+---
+
+## 🚀 Option 1 : Déploiement via Image Docker préconstruite (Recommandé)
+
+Grâce au fichier `.github/workflows/docker-publish.yml` configuré dans votre dépôt, chaque `git push` sur la branche principale compile automatiquement une image Docker multi-architecture (`linux/amd64` pour PC/ZimaOS et `linux/arm64` pour Raspberry Pi) et la publie sur le registre **GitHub Container Registry (GHCR)**.
+
+### 1. Activer la visibilité publique de l'image (1 fois seulement sur GitHub) :
+1. Sur GitHub, ouvrez votre dépôt.
+2. Allez dans **Packages** (sur le côté droit de la page d'accueil de votre repo).
+3. Cliquez sur le package `domotix`.
+4. Dans **Package Settings**, faites défiler vers le bas jusqu'à **Danger Zone** et passez la visibilité en **Public** (cela permet à votre serveur de télécharger l'image sans avoir besoin de mot de passe Docker).
+
+### 2. Lancer sur votre serveur avec Docker Compose :
+Sur votre serveur ZimaOS (en SSH ou dans le terminal) :
+
 ```bash
-# 1. Créez un dossier pour Domotix
-mkdir -p /DATA/AppData/domotix
-cd /DATA/AppData/domotix
-
-# 2. Copiez l'ensemble des fichiers du projet dans ce dossier :
-# - docker-compose.yml
-# - Dockerfile
-# - requirements.txt
-# - database.py
-# - models.py
-# - ollama_service.py
-# - speech_service.py
-# - main.py
-# - templates/index.html
-
-# 3. Lancez le conteneur Docker en arrière-plan
-docker compose up -d --build
-
-# 4. Vérifiez les logs
-docker compose logs -f domotix
+mkdir -p ~/AppData/domotix && cd ~/AppData/domotix
 ```
 
-Accédez à l'application depuis n'importe quel smartphone ou PC sur votre réseau local :  
-👉 **`http://<IP_DE_VOTRE_ZIMAOS>:8000`**
+Créez ou éditez le fichier `docker-compose.yml` :
+```yaml
+version: "3.8"
+
+services:
+  domotix:
+    image: ghcr.io/<VOTRE-PSEUDO-GITHUB>/<NOM-DU-REPO>:latest
+    container_name: domotix-inventory
+    restart: unless-stopped
+    ports:
+      - "8585:8000"
+    volumes:
+      - ./data:/data
+    environment:
+      - DATABASE_URL=sqlite:////data/inventory.db
+      - OLLAMA_URL=http://host.docker.internal:11434
+      - WHISPER_URL=http://faster-whisper:9000
+      - PIPER_URL=http://piper:5000
+      - DEFAULT_OLLAMA_MODEL=gemma3:4b
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+```
+*(Remplacez `<VOTRE-PSEUDO-GITHUB>` et `<NOM-DU-REPO>` par vos identifiants GitHub).*
+
+Puis lancez :
+```bash
+docker compose pull
+docker compose up -d
+```
+
+### 3. Ou lancer directement avec une commande `docker run` :
+```bash
+docker run -d \
+  --name domotix-inventory \
+  --restart unless-stopped \
+  -p 8585:8000 \
+  -v $(pwd)/data:/data \
+  --add-host=host.docker.internal:host-gateway \
+  -e DATABASE_URL=sqlite:////data/inventory.db \
+  -e OLLAMA_URL=http://host.docker.internal:11434 \
+  ghcr.io/<VOTRE-PSEUDO-GITHUB>/<NOM-DU-REPO>:latest
+```
 
 ---
 
-## 🎙️ Exemples d'utilisation vocale
+## 🛠️ Option 2 : Déploiement via Git (Code Source)
 
-### 1. Ajout d'inventaire
-> *"Je suis dans le garage devant l'étagère à côté de l'entrée, dans la caisse en carton Action 02 j'ai du ruban de masquage, un rouleau à peinture et un masque FP2."*
+Si vous préférez cloner le dépôt et laisser Docker compiler l'application directement sur la machine :
 
-- **Résultat extrait automatiquement par Ollama** :
-  - **Pièce** : `Garage`
-  - **Emplacement** : `Étagère à côté de l'entrée`
-  - **Contenant** : `Caisse en carton Action 02`
-  - **Objets** : `["ruban de masquage", "rouleau à peinture", "masque FP2"]`
-- Si l'option de validation est active dans les réglages, une fenêtre modale vous permet de vérifier ou d'ajuster les éléments avant l'enregistrement définitif.
+### 1. Sur votre serveur ZimaOS :
+```bash
+cd ~/AppData
+git clone https://github.com/<VOTRE-PSEUDO-GITHUB>/<NOM-DU-REPO>.git domotix
+cd domotix
+```
 
-### 2. Recherche d'objets
-> *"Je cherche une paire de ciseau et du ruban de masquage."*
+### 2. Lancer avec le script intelligent `start.sh` :
+Le script vérifie la disponibilité des ports (évite le conflit avec le port 8000 déjà utilisé), crée le dossier `/data` persistant et choisit la meilleure méthode d'exécution :
+```bash
+chmod +x start.sh
+./start.sh
+```
 
-- Le backend interroge SQLite de façon insensible à la casse et partielle.
-- Réponse vocale générée par Piper-TTS et lue à voix haute :
-  > *"Pour 'paire de ciseau' : paire de ciseaux dans Cuisine > Tiroir. Pour 'ruban de masquage' : ruban de masquage dans Garage > Étagère à côté de l'entrée > Caisse en carton Action 02."*
+### 💡 Note importante pour ZimaOS :
+Sur ZimaOS / Alpine / Debian moderne, Docker Compose est installé en tant que sous-commande Docker V2 :
+- ❌ **Ne pas utiliser** : `docker-compose` (avec un tiret, car cette ancienne commande v1 n'est pas installée).
+- ✅ **Utiliser** : `docker compose` (avec un espace) !
+
+Si vous préférez exécuter la commande manuellement :
+```bash
+docker compose up -d --build
+```
+
+Pour mettre à jour après avoir fait des modifications sur GitHub :
+```bash
+git pull
+docker compose up -d --build
+```
 
 ---
 
-## ⚙️ Configuration & Réglages
+## 🖥️ Option 3 : Interface Graphique ZimaOS / CasaOS
 
-Accessible directement depuis l'onglet **Réglages** de l'interface :
-- **URL Ollama** : adresse de votre conteneur Ollama (ex: `http://ollama:11434` ou `http://192.168.1.X:11434`).
-- **Bouton de test** : diagnostic de connexion immédiat avec retour visuel (Pastille verte / rouge).
-- **Sélecteur de modèle** : bouton pour interroger l'API `/api/tags` d'Ollama et lister dynamiquement les modèles installés.
-- **Toggle Validation** : Activer / désactiver la modale de confirmation avant ajout.
-- **Export / Import** : Sauvegardes instantanées au format JSON et tableur CSV.
+Vous pouvez installer Domotix sans jamais ouvrir de terminal :
+1. Connectez-vous à l'interface web de votre **ZimaOS** (`http://zimaos.local`).
+2. Allez dans **App Store**.
+3. En haut à droite, cliquez sur **Custom Install** (ou **Installer une application personnalisée**).
+4. Cliquez sur **Import** (icône en haut à droite de la fenêtre modale) et collez le contenu du fichier `docker-compose.yml`.
+5. Ou renseignez manuellement les champs :
+   - **Nom de l'application** : `Domotix`
+   - **Image Docker** : `ghcr.io/<VOTRE-PSEUDO-GITHUB>/<NOM-DU-REPO>:latest` (ou construite localement)
+   - **Port de l'hôte** : `8585` (ou tout port libre) ➔ **Port du conteneur** : `8000`
+   - **Volume hôte** : `/DATA/AppData/domotix/data` ➔ **Conteneur** : `/data`
+   - **Variables d'environnement** :
+     - `OLLAMA_URL=http://host.docker.internal:11434`
+     - `DATABASE_URL=sqlite:////data/inventory.db`
+6. Cliquez sur **Enregistrer / Installer**. L'icône Domotix apparaîtra directement sur le bureau ZimaOS !
+
+---
+
+## 🌐 Accès à l'application
+
+Une fois démarré, ouvrez votre navigateur depuis votre téléphone ou PC sur le même réseau :
+👉 **`http://<IP_DE_VOTRE_ZIMAOS>:8585`**  
+*(Exemple : `http://192.168.1.50:8585` ou `http://zimaos.local:8585`)*
+
+### 🔍 Vérifier l'état et les logs :
+```bash
+docker compose logs -f domotix
+```
+Ou dans l'interface ZimaOS : cliquez sur les 3 petits points de l'application Domotix > **Logs**.

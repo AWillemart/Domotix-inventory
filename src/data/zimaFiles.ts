@@ -168,6 +168,7 @@ def init_db():
         "whisper_url": os.getenv("WHISPER_URL", "http://faster-whisper:9000"),
         "piper_url": os.getenv("PIPER_URL", "http://piper:5000"),
         "ollama_model": os.getenv("DEFAULT_OLLAMA_MODEL", "gemma3:4b"),
+        "piper_voice": os.getenv("DEFAULT_PIPER_VOICE", "fr_FR-siwis-medium"),
         "require_validation": "true",  # "true" ou "false"
     }
 
@@ -581,18 +582,60 @@ def transcribe_audio(audio_bytes: bytes, filename: str = "recording.webm", whisp
     return ""
 
 
-def synthesize_speech(text: str, piper_url: str = "http://piper:5000") -> Optional[bytes]:
+def list_piper_voices(piper_url: str = "http://piper:5000") -> list:
+    """Récupère la liste des voix Piper disponibles auprès du serveur."""
+    default_french_voices = [
+        {"id": "fr_FR-siwis-medium", "name": "Siwis (Femme, Studio Medium)", "lang": "fr_FR"},
+        {"id": "fr_FR-upmc-medium", "name": "UPMC (Homme, Clair & Posé)", "lang": "fr_FR"},
+        {"id": "fr_FR-siwis-low", "name": "Siwis (Femme, Rapide & Léger)", "lang": "fr_FR"},
+        {"id": "fr_FR-gilles-low", "name": "Gilles (Homme, Standard)", "lang": "fr_FR"},
+        {"id": "fr_FR-mls-medium", "name": "MLS (Homme, Studio Medium)", "lang": "fr_FR"},
+    ]
+    if not piper_url:
+        return default_french_voices
+
+    base = piper_url.strip().rstrip("/")
+    for path in ["/voices", "/api/voices"]:
+        try:
+            r = requests.get(f"{base}{path}", timeout=3)
+            if r.status_code == 200:
+                data = r.json()
+                voices = []
+                if isinstance(data, dict):
+                    for k, v in data.items():
+                        name = v.get("name", k) if isinstance(v, dict) else str(k)
+                        voices.append({"id": k, "name": name, "lang": "fr"})
+                elif isinstance(data, list):
+                    for item in data:
+                        if isinstance(item, dict):
+                            voices.append({
+                                "id": item.get("key") or item.get("id") or item.get("name"),
+                                "name": item.get("name") or item.get("id"),
+                                "lang": "fr"
+                            })
+                if voices:
+                    return voices
+        except Exception:
+            pass
+
+    return default_french_voices
+
+
+def synthesize_speech(text: str, piper_url: str = "http://piper:5000", voice: Optional[str] = None) -> Optional[bytes]:
     """Envoie le texte à Piper-TTS et renvoie le flux audio WAV brut."""
     if not text or not text.strip():
         return None
 
     base = piper_url.rstrip("/")
+    payload: Dict[str, Any] = {"text": text.strip()}
+    if voice:
+        payload["voice"] = voice
 
     for path in ["/tts", "/api/tts", "/"]:
         try:
             res = requests.post(
                 f"{base}{path}",
-                json={"text": text.strip()},
+                json=payload,
                 headers={"Content-Type": "application/json"},
                 timeout=15
             )
@@ -602,7 +645,10 @@ def synthesize_speech(text: str, piper_url: str = "http://piper:5000") -> Option
             pass
 
     try:
-        res = requests.get(f"{base}/", params={"text": text.strip()}, timeout=15)
+        params = {"text": text.strip()}
+        if voice:
+            params["voice"] = voice
+        res = requests.get(f"{base}/", params=params, timeout=15)
         if res.status_code == 200 and len(res.content) > 100:
             return res.content
     except Exception:
@@ -638,10 +684,12 @@ from models import Piece, Emplacement, Contenant, Objet, Configuration
 import ollama_service
 import speech_service
 
+APP_VERSION = "1.3.0"
+
 app = FastAPI(
     title="Domotix - Inventaire Domotique Vocal",
     description="Application locale d'inventaire intelligent sous ZimaOS via Docker",
-    version="1.0.0"
+    version=APP_VERSION
 )
 
 # Configuration CORS pour réseau local ZimaOS
@@ -675,10 +723,12 @@ class SettingsUpdateRequest(BaseModel):
     whisper_url: Optional[str] = None
     piper_url: Optional[str] = None
     ollama_model: Optional[str] = None
+    piper_voice: Optional[str] = None
     require_validation: Optional[bool] = None
 
 class TTSRequest(BaseModel):
     text: str
+    voice: Optional[str] = None
 
 class PieceCreate(BaseModel):
     nom: str
@@ -955,16 +1005,37 @@ def get_inventory_tree(db: Session = Depends(get_db)):
     return [p.to_dict() for p in pieces]
 
 
+@app.get("/api/version")
+def get_version():
+    return {
+        "version": APP_VERSION,
+        "app": "Domotix",
+        "status": "ready"
+    }
+
 @app.get("/api/settings")
 def get_settings(db: Session = Depends(get_db)):
     configs = db.query(Configuration).all()
     res = {c.cle: c.valeur for c in configs}
     return {
+        "version": APP_VERSION,
         "ollama_url": res.get("ollama_url", "http://ollama:11434"),
         "whisper_url": res.get("whisper_url", "http://faster-whisper:9000"),
         "piper_url": res.get("piper_url", "http://piper:5000"),
         "ollama_model": res.get("ollama_model", "gemma3:4b"),
+        "piper_voice": res.get("piper_voice", "fr_FR-siwis-medium"),
         "require_validation": res.get("require_validation", "true").lower() == "true",
+        "docker_env": {
+            "ollama_url": database.os.getenv("OLLAMA_URL", "http://ollama:11434"),
+            "whisper_url": database.os.getenv("WHISPER_URL", "http://faster-whisper:9000"),
+            "piper_url": database.os.getenv("PIPER_URL", "http://piper:5000"),
+            "ollama_model": database.os.getenv("DEFAULT_OLLAMA_MODEL", "gemma3:4b"),
+            "piper_voice": database.os.getenv("DEFAULT_PIPER_VOICE", "fr_FR-siwis-medium"),
+        },
+        "priority_info": {
+            "active_priority": "Base SQLite (interface)",
+            "initial_priority": "Variables docker-compose.yml"
+        }
     }
 
 
@@ -978,9 +1049,36 @@ def update_settings(payload: SettingsUpdateRequest, db: Session = Depends(get_db
         set_setting_value(db, "piper_url", payload.piper_url.strip())
     if payload.ollama_model is not None:
         set_setting_value(db, "ollama_model", payload.ollama_model.strip())
+    if payload.piper_voice is not None:
+        set_setting_value(db, "piper_voice", payload.piper_voice.strip())
     if payload.require_validation is not None:
         set_setting_value(db, "require_validation", "true" if payload.require_validation else "false")
     return {"success": True, "message": "Paramètres sauvegardés"}
+
+
+@app.post("/api/settings/sync-docker")
+def sync_docker_settings(db: Session = Depends(get_db)):
+    env_ollama = database.os.getenv("OLLAMA_URL", "http://ollama:11434")
+    env_whisper = database.os.getenv("WHISPER_URL", "http://faster-whisper:9000")
+    env_piper = database.os.getenv("PIPER_URL", "http://piper:5000")
+    env_model = database.os.getenv("DEFAULT_OLLAMA_MODEL", "gemma3:4b")
+    env_voice = database.os.getenv("DEFAULT_PIPER_VOICE", "fr_FR-siwis-medium")
+
+    set_setting_value(db, "ollama_url", env_ollama)
+    set_setting_value(db, "whisper_url", env_whisper)
+    set_setting_value(db, "piper_url", env_piper)
+    set_setting_value(db, "ollama_model", env_model)
+    set_setting_value(db, "piper_voice", env_voice)
+
+    return {"success": True, "message": "Synchronisation réussie avec docker-compose.yml !"}
+
+
+@app.get("/api/piper/voices")
+def get_piper_voices(url: Optional[str] = Query(None), db: Session = Depends(get_db)):
+    target_url = url.strip() if url and url.strip() else get_setting_value(db, "piper_url", "http://piper:5000")
+    voices_list = speech_service.list_piper_voices(target_url)
+    return {"voices": voices_list, "success": len(voices_list) > 0, "url": target_url}
+
 `,
   },
   'templates/index.html': {
@@ -1073,6 +1171,24 @@ echo "=========================================================="
 echo "🎉 Domotix est opérationnel !"
 echo "👉 Accédez à l'interface web : http://\${IP_ADDR:-localhost}:\${APP_PORT}"
 echo "=========================================================="
+`,
+  },
+  '.dockerignore': {
+    filename: '.dockerignore',
+    role: 'Exclusion des fichiers inutiles pour un build Docker ultra-rapide et léger',
+    language: 'dockerfile',
+    content: `.git
+.github
+.gitignore
+.aistudio
+.env
+node_modules
+dist
+__pycache__
+*.pyc
+data/
+*.db
+domotix_zimaos.zip
 `,
   },
 };

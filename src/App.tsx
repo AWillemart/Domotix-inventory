@@ -62,12 +62,19 @@ import {
   importInventoryFromCSV,
   SearchMatch,
 } from './utils/storage';
-import { parseNaturalLanguageText, processPromptWithOllama, speakTextWebAudio } from './utils/nlp';
+import {
+  parseNaturalLanguageText,
+  processPromptWithOllama,
+  speakTextWebAudio,
+  playPiperTTS,
+  getAvailableBrowserVoices,
+} from './utils/nlp';
 import { ZIMA_PROJECT_FILES } from './data/zimaFiles';
 import { downloadZimaOSZip } from './utils/zip';
-import { THEMES } from './utils/theme';
+import { getTheme, THEME_LIST } from './utils/theme';
 
 export default function App() {
+  const APP_VERSION = 'v1.3.0';
   const [activeTab, setActiveTab] = useState<'assistant' | 'inventory' | 'settings' | 'zimaos'>('assistant');
   const [inventory, setInventory] = useState<Piece[]>([]);
   const [settings, setSettings] = useState<AppSettings>(loadStoredSettings());
@@ -82,6 +89,19 @@ export default function App() {
     'phi3:mini',
   ]);
   const [isDetectingModels, setIsDetectingModels] = useState(false);
+
+  // Modèles de voix Piper-TTS disponibles
+  const [availablePiperVoices, setAvailablePiperVoices] = useState<{ id: string; name: string }[]>([
+    { id: 'fr_FR-siwis-medium', name: 'Siwis (Femme, Studio Medium)' },
+    { id: 'fr_FR-upmc-medium', name: 'UPMC (Homme, Clair & Posé)' },
+    { id: 'fr_FR-siwis-low', name: 'Siwis (Femme, Rapide & Léger)' },
+    { id: 'fr_FR-gilles-low', name: 'Gilles (Homme, Standard)' },
+    { id: 'fr_FR-mls-medium', name: 'MLS (Homme, Studio Medium)' },
+  ]);
+  const [isDetectingPiperVoices, setIsDetectingPiperVoices] = useState(false);
+  const [isTestingVoice, setIsTestingVoice] = useState(false);
+  const [isSyncingDocker, setIsSyncingDocker] = useState(false);
+  const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([]);
 
   // Capture vocale et texte
   const [isRecording, setIsRecording] = useState(false);
@@ -159,12 +179,38 @@ export default function App() {
   const csvFileInputRef = useRef<HTMLInputElement | null>(null);
   const nativeAudioInputRef = useRef<HTMLInputElement | null>(null);
 
-  const theme = THEMES[settings.theme_color] || THEMES.emerald;
   const isDark = settings.color_mode === 'dark';
+  const theme = getTheme(settings.theme_color, isDark);
 
   // Initialisation et sauvegarde locale
   useEffect(() => {
     setInventory(loadStoredInventory());
+    setBrowserVoices(getAvailableBrowserVoices());
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.onvoiceschanged = () => {
+        setBrowserVoices(getAvailableBrowserVoices());
+      };
+    }
+
+    // Récupérer les paramètres du backend si le serveur tourne
+    fetch('/api/settings')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) {
+          setSettings((prev) => ({
+            ...prev,
+            ollama_url: data.ollama_url || prev.ollama_url,
+            whisper_url: data.whisper_url || prev.whisper_url,
+            piper_url: data.piper_url || prev.piper_url,
+            ollama_model: data.ollama_model || prev.ollama_model,
+            piper_voice: data.piper_voice || prev.piper_voice || 'fr_FR-siwis-medium',
+            require_validation: data.require_validation !== undefined ? data.require_validation : prev.require_validation,
+          }));
+        }
+      })
+      .catch(() => {
+        // En mode standalone frontend
+      });
   }, []);
 
   useEffect(() => {
@@ -493,13 +539,95 @@ export default function App() {
 
       setServiceStatus((prev) => ({ ...prev, [service]: 'success' }));
       showToast(`Service ${service.toUpperCase()} accessible à l'adresse ${cleanedUrl}`, 'success');
+      if (service === 'piper') {
+        detectPiperVoices(cleanedUrl);
+      }
     } catch (err: any) {
       setServiceStatus((prev) => ({ ...prev, [service]: 'warning' }));
       showToast(
-        `Test ${service.toUpperCase()} : réponse non reçue sur ${cleanedUrl}. Vérifiez que le conteneur tourne.`,
+        `Test ${service.toUpperCase()} : réponse directe non reçue sur ${cleanedUrl}. Vérifiez l'adresse IP et que le conteneur tourne.`,
         'warning'
       );
     }
+  };
+
+  const detectPiperVoices = async (url?: string) => {
+    setIsDetectingPiperVoices(true);
+    const targetUrl = (url || settings.piper_url || '').trim();
+    try {
+      const res = await fetch(`/api/piper/voices?url=${encodeURIComponent(targetUrl)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.voices && Array.isArray(data.voices) && data.voices.length > 0) {
+          setAvailablePiperVoices(data.voices);
+          showToast(`${data.voices.length} voix Piper détectée(s) avec succès !`, 'success');
+          return;
+        }
+      }
+    } catch {
+      // Fallback
+    } finally {
+      setIsDetectingPiperVoices(false);
+    }
+  };
+
+  const testTtsVoice = async (textToSpeak?: string) => {
+    setIsTestingVoice(true);
+    const text = textToSpeak || "Bonjour ! Ceci est un test de la voix de synthèse vocale pour Domotix.";
+    try {
+      if (settings.tts_engine === 'browser') {
+        speakTextWebAudio(text, settings.browser_voice, settings.tts_speed || 1.0);
+        showToast('Lecture audio par la synthèse du navigateur en cours...', 'success');
+      } else {
+        const played = await playPiperTTS(text, settings.piper_url, settings.piper_voice);
+        if (played) {
+          showToast(`Test de la voix "${settings.piper_voice || 'Siwis'}" joué !`, 'success');
+        } else {
+          speakTextWebAudio(text, undefined, settings.tts_speed || 1.0);
+          showToast('Fallback synthèse navigateur effectuée.', 'warning');
+        }
+      }
+    } catch (err: any) {
+      showToast(`Erreur test voix : ${err.message || 'Échec de lecture'}`, 'error');
+    } finally {
+      setTimeout(() => setIsTestingVoice(false), 1200);
+    }
+  };
+
+  const syncWithDockerEnv = async () => {
+    setIsSyncingDocker(true);
+    try {
+      const res = await fetch('/api/settings/sync-docker', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.settings) {
+          setSettings((prev) => ({
+            ...prev,
+            ollama_url: data.settings.ollama_url || prev.ollama_url,
+            whisper_url: data.settings.whisper_url || prev.whisper_url,
+            piper_url: data.settings.piper_url || prev.piper_url,
+            ollama_model: data.settings.ollama_model || prev.ollama_model,
+            piper_voice: data.settings.piper_voice || prev.piper_voice,
+          }));
+        }
+        showToast("Synchronisation avec docker-compose.yml réussie !", 'success');
+        return;
+      }
+    } catch {
+      // ignore
+    } finally {
+      setIsSyncingDocker(false);
+    }
+    // Fallback local
+    setSettings((prev) => ({
+      ...prev,
+      ollama_url: 'http://ollama:11434',
+      whisper_url: 'http://faster-whisper:9000',
+      piper_url: 'http://piper:5000',
+      ollama_model: 'gemma3:4b',
+      piper_voice: 'fr_FR-siwis-medium',
+    }));
+    showToast("Paramètres réinitialisés aux valeurs standards de docker-compose.yml.", 'success');
   };
 
   // ---------------------------------------------------------------------------
@@ -888,15 +1016,22 @@ export default function App() {
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold tracking-tight">Domotix</span>
+                  <span className="font-semibold tracking-tight text-sm">Domotix</span>
                   <span
-                    className={`text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border font-medium ${theme.badgeBg} ${theme.badgeText} ${theme.badgeBorder}`}
+                    className={`text-[10px] font-mono px-1.5 py-0.5 rounded border font-semibold ${theme.badgeBg} ${theme.badgeText} ${theme.badgeBorder}`}
+                  >
+                    {APP_VERSION}
+                  </span>
+                  <span
+                    className={`text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border font-medium ${
+                      isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-slate-100 text-slate-700 border-slate-300'
+                    }`}
                   >
                     ZimaOS
                   </span>
                 </div>
                 <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  Inventaire Vocal Intelligent
+                  Inventaire Vocal & Sémantique
                 </p>
               </div>
             </div>
@@ -1650,25 +1785,32 @@ export default function App() {
               </div>
 
               {/* Choix de la couleur dominante */}
-              <div className="space-y-2 pt-2 border-t border-slate-800/60">
-                <label className="block text-xs font-medium">Couleur dominante de l'interface</label>
+              <div className={`space-y-2 pt-3 border-t ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium">Couleur dominante de l'interface</label>
+                  <span className={`text-[11px] font-semibold ${theme.primaryText}`}>
+                    Actif : {theme.label}
+                  </span>
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-                  {(Object.keys(THEMES) as ThemeColor[]).map((tKey) => {
-                    const item = THEMES[tKey];
-                    const isSelected = settings.theme_color === tKey;
+                  {THEME_LIST.map((item) => {
+                    const isSelected = settings.theme_color === item.name;
+                    const itemTheme = getTheme(item.name, isDark);
                     return (
                       <button
-                        key={tKey}
+                        key={item.name}
                         onClick={() => {
-                          setSettings({ ...settings, theme_color: tKey });
+                          setSettings({ ...settings, theme_color: item.name });
                           showToast(`Thème "${item.label}" activé !`, 'success');
                         }}
                         className={`p-2.5 rounded-xl border flex items-center gap-2.5 transition-all text-left text-xs ${
                           isSelected
-                            ? `${item.badgeBg} ${item.primaryBorder} font-semibold ring-2 ${item.ring}`
+                            ? isDark
+                              ? `${itemTheme.badgeBg} ${itemTheme.primaryBorder} font-semibold ring-2 ${itemTheme.ring}`
+                              : `bg-white border-2 border-slate-900 font-semibold ring-2 ${itemTheme.ring} shadow-md`
                             : isDark
                             ? 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-300'
-                            : 'bg-slate-50 border-slate-200 hover:border-slate-300 text-slate-700'
+                            : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700 shadow-xs'
                         }`}
                       >
                         <span
@@ -1683,24 +1825,178 @@ export default function App() {
               </div>
             </div>
 
-            {/* 2. Services Locaux ZimaOS (Ollama, Whisper, Piper) */}
+            {/* 2. Synthèse Vocale & Voix (Piper-TTS) */}
+            <div
+              className={`border rounded-2xl p-5 space-y-4 shadow-lg transition-colors ${
+                isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
+              }`}
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Volume2 className={`w-4 h-4 ${theme.primaryText}`} />
+                  <div>
+                    <h2 className="text-sm font-semibold">Synthèse Vocale & Modèles de Voix</h2>
+                    <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      Sélectionnez votre voix Piper locale ou navigateur et testez le rendu sonore.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => testTtsVoice()}
+                  disabled={isTestingVoice}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold text-white flex items-center gap-1.5 transition-all shadow-sm active:scale-95 ${theme.primaryBg} ${theme.primaryHover}`}
+                >
+                  <Volume2 className={`w-3.5 h-3.5 ${isTestingVoice ? 'animate-bounce' : ''}`} />
+                  <span>{isTestingVoice ? 'Écoute en cours...' : 'Tester la voix'}</span>
+                </button>
+              </div>
+
+              <div className={`space-y-4 border-t pt-4 ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
+                {/* Moteur TTS */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <label className="text-xs font-medium block">Moteur de synthèse</label>
+                    <span className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      Piper-TTS (synthèse IA haute qualité locale) ou moteur de votre navigateur.
+                    </span>
+                  </div>
+                  <select
+                    value={settings.tts_engine || 'auto'}
+                    onChange={(e) => setSettings({ ...settings, tts_engine: e.target.value as any })}
+                    className={`border rounded-xl px-3 py-1.5 text-xs focus:outline-none ${
+                      isDark ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-900'
+                    } ${theme.ring}`}
+                  >
+                    <option value="auto">Automatique (Piper en priorité, sinon Navigateur)</option>
+                    <option value="piper">Piper-TTS uniquement (Serveur local ZimaOS)</option>
+                    <option value="browser">Navigateur uniquement (Web Speech API)</option>
+                  </select>
+                </div>
+
+                {/* Voix Piper */}
+                {settings.tts_engine !== 'browser' && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-medium">Modèle de voix Piper-TTS</label>
+                      <button
+                        onClick={() => detectPiperVoices()}
+                        disabled={isDetectingPiperVoices}
+                        className={`text-[11px] flex items-center gap-1 hover:underline font-medium ${theme.primaryText}`}
+                      >
+                        <RefreshCw className={`w-3 h-3 ${isDetectingPiperVoices ? 'animate-spin' : ''}`} />
+                        <span>{isDetectingPiperVoices ? 'Détection...' : 'Actualiser les voix'}</span>
+                      </button>
+                    </div>
+                    <div className="flex gap-2">
+                      <select
+                        value={settings.piper_voice || 'fr_FR-siwis-medium'}
+                        onChange={(e) => setSettings({ ...settings, piper_voice: e.target.value })}
+                        className={`flex-1 border rounded-xl px-3 py-2 text-xs font-mono focus:outline-none ${
+                          isDark ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-900'
+                        } ${theme.ring}`}
+                      >
+                        {availablePiperVoices.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => testTtsVoice()}
+                        disabled={isTestingVoice}
+                        className={`px-3 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors ${
+                          isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200'
+                        }`}
+                      >
+                        <Volume2 className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Écouter</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Vitesse de lecture */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                  <div>
+                    <label className="text-xs font-medium block">Vitesse d'élocution</label>
+                    <span className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      Actuelle : <strong>{(settings.tts_speed || 1.0).toFixed(1)}x</strong>
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[11px] text-slate-400 font-mono">0.8x</span>
+                    <input
+                      type="range"
+                      min="0.8"
+                      max="1.5"
+                      step="0.1"
+                      value={settings.tts_speed || 1.0}
+                      onChange={(e) => setSettings({ ...settings, tts_speed: parseFloat(e.target.value) })}
+                      className="w-32 cursor-pointer"
+                    />
+                    <span className="text-[11px] text-slate-400 font-mono">1.5x</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. Services Locaux ZimaOS (Ollama, Whisper, Piper) */}
             <div
               className={`border rounded-2xl p-5 space-y-5 shadow-lg transition-colors ${
                 isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
               }`}
             >
-              <div className="flex items-center gap-2">
-                <Server className={`w-4 h-4 ${theme.primaryText}`} />
-                <div>
-                  <h2 className="text-sm font-semibold">Services Locaux ZimaOS</h2>
-                  <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Endpoints des microservices IA sur votre réseau local ZimaOS.
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Server className={`w-4 h-4 ${theme.primaryText}`} />
+                  <div>
+                    <h2 className="text-sm font-semibold">Services Locaux ZimaOS</h2>
+                    <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      Endpoints des microservices IA sur votre réseau local ZimaOS.
+                    </p>
+                  </div>
+                </div>
+                <span className={`text-[10px] font-mono px-2 py-0.5 rounded border font-semibold ${theme.badgeBg} ${theme.badgeText} ${theme.badgeBorder}`}>
+                  Version : {APP_VERSION}
+                </span>
+              </div>
+
+              {/* Explication de la priorité des paramètres */}
+              <div
+                className={`p-3.5 rounded-xl border text-xs space-y-2 ${
+                  isDark ? 'bg-slate-950/80 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-800'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 font-semibold text-amber-500">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>Priorité des configurations (Docker vs Interface) :</span>
+                </div>
+                <div className="space-y-1 text-[11px] leading-relaxed">
+                  <p>
+                    🥇 <strong>Priorité 1 (Active) :</strong> Toute configuration modifiée et enregistrée dans cette interface est stockée dans la base SQLite locale (<code>/data/inventory.db</code>) et prend le dessus immédiatement.
                   </p>
+                  <p>
+                    🥈 <strong>Priorité 2 (Démarrage initial) :</strong> Les variables d'environnement de votre <code>docker-compose.yml</code> servent à amorcer l'application lors de la toute première création de la base de données.
+                  </p>
+                </div>
+                <div className="pt-1 flex items-center justify-end">
+                  <button
+                    onClick={syncWithDockerEnv}
+                    disabled={isSyncingDocker}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-medium border flex items-center gap-1.5 transition-colors ${
+                      isDark
+                        ? 'bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-200'
+                        : 'bg-white border-slate-300 hover:bg-slate-100 text-slate-800 shadow-xs'
+                    }`}
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isSyncingDocker ? 'animate-spin' : ''}`} />
+                    <span>{isSyncingDocker ? 'Synchronisation...' : 'Restaurer les variables de docker-compose.yml'}</span>
+                  </button>
                 </div>
               </div>
 
               {/* Ollama API */}
-              <div className="space-y-2 border-t border-slate-800/80 pt-4">
+              <div className={`space-y-2 border-t pt-4 ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-medium">URL API Ollama (Extraction Sémantique)</label>
                   <span className={`text-[11px] ${theme.primaryText}`}>Ex: http://192.168.1.50:11434 ou http://ollama:11434</span>
@@ -1761,7 +2057,7 @@ export default function App() {
               </div>
 
               {/* Faster-Whisper API */}
-              <div className="space-y-2 border-t border-slate-800/80 pt-4">
+              <div className={`space-y-2 border-t pt-4 ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
                 <label className="block text-xs font-medium">URL API Faster-Whisper (Transcription Audio)</label>
                 <div className="flex gap-2">
                   <input
@@ -1795,7 +2091,7 @@ export default function App() {
               </div>
 
               {/* Piper-TTS API */}
-              <div className="space-y-2 border-t border-slate-800/80 pt-4">
+              <div className={`space-y-2 border-t pt-4 ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
                 <label className="block text-xs font-medium">URL API Piper-TTS (Synthèse Vocale)</label>
                 <div className="flex gap-2">
                   <input
@@ -1829,7 +2125,7 @@ export default function App() {
               </div>
 
               {/* Port d'écoute ZimaOS */}
-              <div className="space-y-2 border-t border-slate-800/80 pt-4">
+              <div className={`space-y-2 border-t pt-4 ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
                 <label className="block text-xs font-medium">Port d'écoute web ZimaOS (anti-conflit port 8000)</label>
                 <div className="flex items-center gap-3">
                   <input
@@ -1849,7 +2145,7 @@ export default function App() {
               </div>
 
               {/* Validation switch */}
-              <div className="border-t border-slate-800/80 pt-4 flex items-center justify-between">
+              <div className={`border-t pt-4 flex items-center justify-between ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
                 <div>
                   <span className="block text-xs font-medium">Validation avant enregistrement</span>
                   <span className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
@@ -2004,15 +2300,29 @@ export default function App() {
             >
               <div className="flex items-center gap-2 font-semibold text-amber-400">
                 <AlertTriangle className="w-4 h-4" />
-                <span>Guide de démarrage & Résolution des erreurs ZimaOS :</span>
+                <span>Guide de déploiement & Démarrage sur votre serveur (ZimaOS / Docker) :</span>
               </div>
               <div className="space-y-3 text-slate-300">
                 <div className="bg-slate-950 p-3.5 rounded-lg border border-slate-800 space-y-2">
-                  <p className="text-xs font-semibold text-emerald-400">
-                    ✨ OPTION 1 : Lancement universel en 1 commande (Recommandé) :
+                  <p className="text-xs font-semibold text-purple-400">
+                    🐙 DÉPLOIEMENT VIA GITHUB & IMAGE PRÉCONSTRUITE (Recommandé) :
                   </p>
                   <p className="text-slate-400 text-[11px]">
-                    Le script <code className="text-emerald-300">start.sh</code> détecte automatiquement Docker et recherche un port libre si le 8000 ou 8585 est déjà utilisé :
+                    Un workflow GitHub Actions (<code>.github/workflows/docker-publish.yml</code>) est prêt. À chaque push, il génère une image Docker prête à l'emploi (sans compiler sur votre serveur) :
+                  </p>
+                  <div className="font-mono text-[11px] text-purple-300 bg-slate-900/90 p-2 rounded border border-slate-800 space-y-1">
+                    <p># Cloner et lancer en 2 commandes :</p>
+                    <p>git clone &lt;URL_DE_VOTRE_REPO_GITHUB&gt; domotix && cd domotix</p>
+                    <p>bash start.sh</p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 p-3.5 rounded-lg border border-slate-800 space-y-2">
+                  <p className="text-xs font-semibold text-emerald-400">
+                    ✨ OPTION 1 : Lancement universel en 1 commande avec start.sh :
+                  </p>
+                  <p className="text-slate-400 text-[11px]">
+                    Le script <code className="text-emerald-300">start.sh</code> résout tout seul les conflits de port (évite le port 8000), crée le dossier persistant et choisit <code>docker compose</code> ou <code>docker run</code> :
                   </p>
                   <div className="font-mono text-[11px] text-emerald-300 bg-slate-900/90 p-2 rounded border border-slate-800">
                     bash start.sh
@@ -2021,14 +2331,13 @@ export default function App() {
 
                 <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1.5">
                   <p className="text-xs font-semibold text-blue-400">
-                    🔧 OPTION 2 : Lancement direct sans Docker Compose :
+                    💡 ATTENTION SYNTAXE DOCKER SUR ZIMAOS :
                   </p>
                   <p className="text-slate-400 text-[11px]">
-                    Si votre ZimaOS n'a pas <code className="text-blue-300">docker-compose</code>, utilisez directement Docker natif :
+                    Sur ZimaOS, la commande autonome <code className="text-rose-400">docker-compose</code> n'existe pas. Utilisez toujours avec un espace :
                   </p>
                   <div className="font-mono text-[11px] text-blue-300 bg-slate-900/90 p-2 rounded border border-slate-800 space-y-1">
-                    <p>docker build -t domotix .</p>
-                    <p>docker run -d --name domotix-inventory --restart unless-stopped -p 8585:8000 -v $(pwd)/data:/data domotix</p>
+                    <p>docker compose up -d --build</p>
                   </div>
                 </div>
               </div>

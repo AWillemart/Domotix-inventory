@@ -1,0 +1,30 @@
+# Git & AI Studio artifacts
+.git
+.github
+.gitignore
+.aistudio
+.env
+
+# Node.js dependencies & builds
+node_modules
+dist
+package-lock.json
+bun.lock
+
+# Python cache & virtualenvs
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+
+# Local databases & uploads
+data/
+*.db
+*.sqlite3
+domotix_zimaos.zip
+whisper-models/
+piper-data/

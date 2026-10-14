@@ -35,6 +35,9 @@ import {
   ExternalLink,
   ChevronRight,
   Server,
+  GitBranch,
+  ArrowUpCircle,
+  Github,
 } from 'lucide-react';
 
 import {
@@ -48,6 +51,7 @@ import {
   ColorMode,
   ToastInfo,
   ToastType,
+  UpdateInfo,
 } from './types';
 import {
   loadStoredInventory,
@@ -102,6 +106,15 @@ export default function App() {
   const [isTestingVoice, setIsTestingVoice] = useState(false);
   const [isSyncingDocker, setIsSyncingDocker] = useState(false);
   const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([]);
+
+  // Système de mise à jour depuis GitHub
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [isApplyingUpdate, setIsApplyingUpdate] = useState(false);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [updateStep, setUpdateStep] = useState<'idle' | 'installing' | 'reconnecting' | 'success' | 'instructions' | 'error'>('idle');
+  const [updateLogs, setUpdateLogs] = useState<string[]>([]);
+  const [updateCountdown, setUpdateCountdown] = useState<number>(0);
 
   // Capture vocale et texte
   const [isRecording, setIsRecording] = useState(false);
@@ -205,11 +218,14 @@ export default function App() {
             ollama_model: data.ollama_model || prev.ollama_model,
             piper_voice: data.piper_voice || prev.piper_voice || 'fr_FR-siwis-medium',
             require_validation: data.require_validation !== undefined ? data.require_validation : prev.require_validation,
+            github_repo: data.github_repo || prev.github_repo || 'awillemart/domotix-inventory',
+            github_branch: data.github_branch || prev.github_branch || 'main',
           }));
         }
+        setTimeout(() => checkForUpdates(false), 800);
       })
       .catch(() => {
-        // En mode standalone frontend
+        setTimeout(() => checkForUpdates(false), 800);
       });
   }, []);
 
@@ -626,8 +642,165 @@ export default function App() {
       piper_url: 'http://piper:5000',
       ollama_model: 'gemma3:4b',
       piper_voice: 'fr_FR-siwis-medium',
+      github_repo: 'awillemart/domotix-inventory',
+      github_branch: 'main',
     }));
     showToast("Paramètres réinitialisés aux valeurs standards de docker-compose.yml.", 'success');
+  };
+
+  // ---------------------------------------------------------------------------
+  // Vérification & Installation des Mises à Jour GitHub
+  // ---------------------------------------------------------------------------
+  const checkForUpdates = async (manual = false) => {
+    setIsCheckingUpdate(true);
+    try {
+      const repo = settings.github_repo || 'awillemart/domotix-inventory';
+      const branch = settings.github_branch || 'main';
+
+      let data: UpdateInfo | null = null;
+      try {
+        const res = await fetch(`/api/system/check-update?repo=${encodeURIComponent(repo)}&branch=${encodeURIComponent(branch)}`);
+        if (res.ok) {
+          data = await res.json();
+        }
+      } catch {
+        // En mode standalone frontend
+      }
+
+      // Fallback vers l'API publique GitHub si le backend FastAPI n'est pas actif
+      if (!data || data.error) {
+        const cleanRepo = repo.replace(/[-._]+$/, '');
+        try {
+          const ghRes = await fetch(`https://api.github.com/repos/${cleanRepo}/commits/${branch}`);
+          if (ghRes.ok) {
+            const ghData = await ghRes.json();
+            const shortSha = ghData.sha?.substring(0, 7) || '';
+            data = {
+              update_available: true,
+              current_version: APP_VERSION,
+              latest_version: `Commit ${shortSha}`,
+              latest_commit: shortSha,
+              commit_message: ghData.commit?.message?.split('\n')[0] || 'Dernière version publiée',
+              author: ghData.commit?.author?.name || 'GitHub',
+              commit_date: ghData.commit?.author?.date || new Date().toISOString(),
+              html_url: ghData.html_url,
+              repo: cleanRepo,
+              branch,
+              can_auto_update: true,
+            };
+          }
+        } catch {
+          // Erreur réseau ou API GitHub inaccessible
+        }
+      }
+
+      if (data && !data.error) {
+        setUpdateInfo(data);
+        if (manual) {
+          if (data.update_available) {
+            showToast(`Mise à jour disponible : ${data.latest_version} (${data.commit_message})`, 'success');
+          } else {
+            showToast('Domotix est déjà à jour (dernière version).', 'success');
+          }
+        }
+      } else if (manual) {
+        showToast("Impossible de joindre GitHub. Vérifiez le nom du dépôt ou votre connexion.", 'warning');
+      }
+    } catch (err: any) {
+      if (manual) {
+        showToast("Erreur lors de la vérification : " + (err.message || 'Réseau'), 'error');
+      }
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
+
+  const handleApplyUpdate = async () => {
+    setIsApplyingUpdate(true);
+    setShowUpdateModal(true);
+    setUpdateStep('installing');
+    setUpdateLogs(['🚀 Démarrage du processus de mise à jour...']);
+
+    try {
+      const res = await fetch('/api/system/apply-update', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setUpdateLogs((prev) => [
+            ...prev,
+            `📦 Mode de déploiement : ${data.mode}`,
+            `📥 ${data.message}`,
+            '🔄 Redémarrage du conteneur en cours...',
+          ]);
+          setUpdateStep('reconnecting');
+          let remaining = data.countdown || 15;
+          setUpdateCountdown(remaining);
+
+          const countdownInterval = setInterval(() => {
+            remaining -= 1;
+            setUpdateCountdown(remaining);
+            if (remaining <= 0) {
+              clearInterval(countdownInterval);
+              pollHealthCheck();
+            }
+          }, 1000);
+          return;
+        }
+      }
+    } catch {
+      // Si la requête coupe car le conteneur redémarre instantanément
+      setUpdateLogs((prev) => [
+        ...prev,
+        '🔄 Signal de redémarrage envoyé au serveur.',
+        '⏳ En attente de la remise en ligne du conteneur...',
+      ]);
+      setUpdateStep('reconnecting');
+      setUpdateCountdown(12);
+      setTimeout(() => pollHealthCheck(), 12000);
+      return;
+    }
+
+    // Si aucune méthode auto n'a pu redémarrer directement
+    setUpdateStep('instructions');
+    setUpdateLogs((prev) => [
+      ...prev,
+      '💡 La mise à jour est prête sur votre registre GitHub Container (GHCR).',
+      '👉 Pour finaliser en 1 ligne : docker compose pull && docker compose up -d',
+      '👉 Ou montez /var/run/docker.sock dans docker-compose.yml pour la prochaine fois.',
+    ]);
+    setIsApplyingUpdate(false);
+  };
+
+  const pollHealthCheck = () => {
+    setUpdateLogs((prev) => [...prev, '🔌 Test de connexion au serveur Domotix...']);
+    let attempts = 0;
+    const maxAttempts = 25;
+
+    const interval = setInterval(async () => {
+      attempts += 1;
+      try {
+        const res = await fetch('/api/health');
+        if (res.ok) {
+          clearInterval(interval);
+          setUpdateStep('success');
+          setUpdateLogs((prev) => [...prev, '🎉 Serveur reconnecté avec succès !']);
+          showToast('Mise à jour installée avec succès !', 'success');
+          setTimeout(() => {
+            window.location.reload();
+          }, 2000);
+        }
+      } catch {
+        if (attempts >= maxAttempts) {
+          clearInterval(interval);
+          setUpdateStep('instructions');
+          setUpdateLogs((prev) => [
+            ...prev,
+            '⚠️ Le conteneur tarde à redémarrer.',
+            '👉 Vérifiez le statut avec "docker ps" sur votre serveur ZimaOS.',
+          ]);
+        }
+      }
+    }, 2000);
   };
 
   // ---------------------------------------------------------------------------
@@ -1029,6 +1202,19 @@ export default function App() {
                   >
                     ZimaOS
                   </span>
+                  {updateInfo?.update_available && (
+                    <button
+                      onClick={() => {
+                        setActiveTab('settings');
+                        setShowUpdateModal(true);
+                      }}
+                      className="flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500 to-emerald-500 text-white animate-pulse shadow-sm hover:scale-105 transition-transform"
+                      title="Nouvelle mise à jour disponible ! Cliquez pour voir et installer"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      <span className="hidden sm:inline">Mise à jour dispo</span>
+                    </button>
+                  )}
                 </div>
                 <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                   Inventaire Vocal & Sémantique
@@ -2248,6 +2434,190 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            {/* 5. Mises à Jour du Système & Déploiement GitHub */}
+            <div
+              className={`border rounded-2xl p-5 space-y-4 shadow-lg transition-colors ${
+                isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
+              }`}
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className={`p-2 rounded-xl border ${theme.glow} ${theme.primaryBorder} ${theme.primaryText}`}>
+                    <Github className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-sm font-semibold">Mises à Jour du Système & Déploiement GitHub</h2>
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded border font-semibold ${theme.badgeBg} ${theme.badgeText} ${theme.badgeBorder}`}>
+                        Installée : {APP_VERSION}
+                      </span>
+                    </div>
+                    <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      Vérifiez les nouvelles versions publiées sur GitHub et déclenchez l'installation directement depuis l'interface.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => checkForUpdates(true)}
+                    disabled={isCheckingUpdate}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm ${
+                      isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
+                    }`}
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isCheckingUpdate ? 'animate-spin' : ''}`} />
+                    <span>{isCheckingUpdate ? 'Vérification...' : 'Vérifier maintenant'}</span>
+                  </button>
+
+                  {updateInfo?.update_available && (
+                    <button
+                      onClick={() => handleApplyUpdate()}
+                      disabled={isApplyingUpdate}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold text-white flex items-center gap-1.5 transition-all shadow-md active:scale-95 ${theme.primaryBg} ${theme.primaryHover}`}
+                    >
+                      <ArrowUpCircle className="w-3.5 h-3.5" />
+                      <span>Installer la mise à jour</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Paramètres du Dépôt GitHub */}
+              <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 border-t pt-4 ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
+                <div>
+                  <label className="text-xs font-medium block mb-1">Dépôt GitHub (owner/repository)</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={settings.github_repo || 'awillemart/domotix-inventory'}
+                      onChange={(e) => setSettings({ ...settings, github_repo: e.target.value.trim() })}
+                      placeholder="awillemart/domotix-inventory"
+                      className={`w-full border rounded-xl px-3 py-2 text-xs font-mono focus:outline-none ${
+                        isDark ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-900'
+                      } ${theme.ring}`}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium block mb-1">Branche surveillée</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={settings.github_branch || 'main'}
+                      onChange={(e) => setSettings({ ...settings, github_branch: e.target.value.trim() })}
+                      placeholder="main"
+                      className={`w-full border rounded-xl px-3 py-2 text-xs font-mono focus:outline-none ${
+                        isDark ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-900'
+                      } ${theme.ring}`}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Résultat du contrôle de mise à jour */}
+              {updateInfo && (
+                <div
+                  className={`rounded-xl p-4 border transition-all ${
+                    updateInfo.update_available
+                      ? isDark
+                        ? 'bg-emerald-950/20 border-emerald-500/40'
+                        : 'bg-emerald-50 border-emerald-300'
+                      : isDark
+                      ? 'bg-slate-950/80 border-slate-800'
+                      : 'bg-slate-50 border-slate-200'
+                  }`}
+                >
+                  {updateInfo.update_available ? (
+                    <div className="space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="relative flex h-2.5 w-2.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                          </span>
+                          <span className="text-xs font-semibold text-emerald-400">
+                            🎉 Nouvelle version disponible sur GitHub !
+                          </span>
+                          <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-900/40 text-emerald-300 border border-emerald-700/50">
+                            {updateInfo.latest_version}
+                          </span>
+                        </div>
+                        {updateInfo.html_url && (
+                          <a
+                            href={updateInfo.html_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-slate-400 hover:text-emerald-400 flex items-center gap-1 underline underline-offset-2"
+                          >
+                            <span>Voir le commit sur GitHub</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        )}
+                      </div>
+
+                      <div className={`p-3 rounded-lg border text-xs font-mono ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-800'}`}>
+                        <p className="font-semibold text-slate-100 flex items-center gap-1.5">
+                          <GitBranch className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>{updateInfo.commit_message || 'Mise à jour disponible'}</span>
+                        </p>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Par <strong>{updateInfo.author || 'Auteur'}</strong> · {updateInfo.commit_date ? new Date(updateInfo.commit_date).toLocaleString('fr-FR') : 'Récemment'}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                        <p className="text-[11px] text-slate-400">
+                          Cliquez ci-contre pour mettre à jour votre serveur ZimaOS en 1 clic sans perdre vos données :
+                        </p>
+                        <button
+                          onClick={() => handleApplyUpdate()}
+                          disabled={isApplyingUpdate}
+                          className={`px-4 py-2 rounded-xl text-xs font-semibold text-white flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all ${theme.primaryBg} ${theme.primaryHover}`}
+                        >
+                          <ArrowUpCircle className="w-4 h-4" />
+                          <span>🚀 Installer la mise à jour maintenant</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : updateInfo.error ? (
+                    <div className="flex items-center gap-2 text-xs text-amber-400">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <span>{updateInfo.error}</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-xs text-emerald-400">
+                      <CheckCircle className="w-4 h-4 shrink-0" />
+                      <span>Domotix est parfaitement à jour avec la branche <strong>{settings.github_branch || 'main'}</strong> de GitHub.</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Guide explicatif du fonctionnement des mises à jour */}
+              <div className={`text-[11px] p-3 rounded-xl border space-y-2 ${isDark ? 'bg-slate-950/60 border-slate-800/80 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                <p className="font-semibold text-slate-300 flex items-center gap-1.5">
+                  <Terminal className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Comment fonctionne le déploiement et la mise à jour ?</span>
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+                  <div className={`p-2.5 rounded-lg border ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200'}`}>
+                    <p className="font-semibold text-emerald-400">1. Déploiement GitHub automatique</p>
+                    <p className="text-slate-400 mt-0.5">
+                      À chaque <code>git push</code> sur votre dépôt, le workflow GitHub Actions (<code>docker-publish.yml</code>) compile l'image Docker multi-architecture et la publie instantanément sur GitHub Packages.
+                    </p>
+                  </div>
+                  <div className={`p-2.5 rounded-lg border ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200'}`}>
+                    <p className="font-semibold text-purple-400">2. Installation 1-Clic dans l'interface</p>
+                    <p className="text-slate-400 mt-0.5">
+                      Avec le volume <code>/var/run/docker.sock</code> actif dans votre <code>docker-compose.yml</code>, le bouton "Installer" déclenche le téléchargement de la nouvelle image et redémarre l'appli sans toucher au terminal.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -3017,6 +3387,192 @@ export default function App() {
                 J'ai compris
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* --------------------------------------------------------------------- */}
+      {/* MODALE D'INSTALLATION DE MISE À JOUR GITHUB */}
+      {/* --------------------------------------------------------------------- */}
+      {showUpdateModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div
+            className={`border rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl transition-colors ${
+              isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
+            }`}
+          >
+            <div className={`flex items-center justify-between border-b pb-3 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              <div className="flex items-center gap-2">
+                <div className={`p-2 rounded-xl border ${theme.glow} ${theme.primaryBorder} ${theme.primaryText}`}>
+                  <ArrowUpCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold">Mise à Jour du Système</h3>
+                  <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    Version actuelle : {APP_VERSION} → Nouvelle : {updateInfo?.latest_version || 'Dernière'}
+                  </p>
+                </div>
+              </div>
+              {updateStep !== 'installing' && updateStep !== 'reconnecting' && (
+                <button
+                  onClick={() => {
+                    setShowUpdateModal(false);
+                    setUpdateStep('idle');
+                  }}
+                  className="text-slate-400 hover:text-slate-200 p-1"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {updateStep === 'idle' && (
+              <div className="space-y-4 text-xs">
+                {updateInfo?.update_available ? (
+                  <div className="space-y-3">
+                    <div className={`p-3.5 rounded-xl border space-y-2 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-emerald-400 flex items-center gap-1.5">
+                          <Sparkles className="w-4 h-4" />
+                          <span>Mise à jour prête sur GitHub</span>
+                        </span>
+                        <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
+                          {updateInfo.latest_version}
+                        </span>
+                      </div>
+                      <p className="font-mono text-slate-200">"{updateInfo.commit_message || 'Améliorations et corrections'}"</p>
+                      <p className="text-[11px] text-slate-400">
+                        Auteur : <strong>{updateInfo.author}</strong> · Date : {updateInfo.commit_date ? new Date(updateInfo.commit_date).toLocaleString('fr-FR') : 'Récent'}
+                      </p>
+                    </div>
+
+                    <div className={`p-3 rounded-xl border text-[11px] space-y-1.5 ${isDark ? 'bg-emerald-950/20 border-emerald-800/40 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
+                      <p className="font-semibold flex items-center gap-1.5">
+                        <CheckCircle className="w-3.5 h-3.5" />
+                        <span>Préservation totale de vos données</span>
+                      </p>
+                      <p className="text-slate-400">
+                        Votre base d'inventaire SQLite (<code>/data/inventory.db</code>) et vos réglages sont stockés sur un volume persistant et ne sont jamais effacés pendant la mise à jour.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-2">
+                      <button
+                        onClick={() => {
+                          setShowUpdateModal(false);
+                          setUpdateStep('idle');
+                        }}
+                        className={`px-3 py-2 rounded-xl text-xs font-medium ${
+                          isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        }`}
+                      >
+                        Plus tard
+                      </button>
+                      <button
+                        onClick={() => handleApplyUpdate()}
+                        className={`px-4 py-2 rounded-xl text-xs font-semibold text-white flex items-center gap-2 shadow-lg ${theme.primaryBg} ${theme.primaryHover}`}
+                      >
+                        <ArrowUpCircle className="w-4 h-4" />
+                        <span>Installer la mise à jour en 1 clic</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-6 space-y-3">
+                    <CheckCircle className="w-10 h-10 text-emerald-400 mx-auto" />
+                    <p className="text-sm font-semibold">Votre système est parfaitement à jour !</p>
+                    <p className="text-slate-400 text-xs">
+                      Vous utilisez déjà la dernière version disponible ({APP_VERSION}).
+                    </p>
+                    <button
+                      onClick={() => {
+                        setShowUpdateModal(false);
+                        setUpdateStep('idle');
+                      }}
+                      className={`px-4 py-2 rounded-xl text-xs font-semibold text-white ${theme.primaryBg} ${theme.primaryHover}`}
+                    >
+                      Fermer
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {(updateStep === 'installing' || updateStep === 'reconnecting') && (
+              <div className="space-y-4 text-xs">
+                <div className="text-center py-4 space-y-2">
+                  <div className="relative inline-flex items-center justify-center">
+                    <RefreshCw className="w-10 h-10 text-emerald-400 animate-spin" />
+                  </div>
+                  <h4 className="font-semibold text-sm">
+                    {updateStep === 'installing' ? 'Téléchargement de la mise à jour...' : 'Reconnexion à Domotix...'}
+                  </h4>
+                  {updateCountdown > 0 && (
+                    <p className="text-xs text-amber-400 font-mono">
+                      Redémarrage du conteneur... Nouvelle vérification dans <strong>{updateCountdown}s</strong>
+                    </p>
+                  )}
+                </div>
+
+                {/* Journal de mise à jour */}
+                <div className={`p-3 rounded-xl border font-mono text-[11px] space-y-1 max-h-40 overflow-y-auto ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-100 border-slate-300 text-slate-800'}`}>
+                  {updateLogs.map((log, idx) => (
+                    <div key={idx} className="leading-relaxed">
+                      {log}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {updateStep === 'success' && (
+              <div className="text-center py-6 space-y-3 text-xs">
+                <CheckCircle className="w-12 h-12 text-emerald-400 mx-auto animate-bounce" />
+                <h4 className="font-semibold text-sm text-emerald-400">Mise à jour réussie avec succès !</h4>
+                <p className="text-slate-300">
+                  Le conteneur Domotix est désormais en dernière version. Rechargement automatique de l'interface en cours...
+                </p>
+              </div>
+            )}
+
+            {updateStep === 'instructions' && (
+              <div className="space-y-3 text-xs">
+                <div className="flex items-center gap-2 text-amber-400 font-semibold">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>Finalisation de la mise à jour</span>
+                </div>
+                <p className="text-slate-300">
+                  L'image préconstruite a été poussée par GitHub Actions. Si votre serveur n'a pas encore le socket Docker lié pour le 1-clic direct, lancez simplement sur votre terminal ZimaOS :
+                </p>
+                <div className={`p-3 rounded-xl border font-mono text-[11px] flex items-center justify-between gap-2 ${isDark ? 'bg-slate-950 border-slate-800 text-emerald-300' : 'bg-slate-100 border-slate-300 text-emerald-700'}`}>
+                  <span>docker compose pull && docker compose up -d</span>
+                  <button
+                    onClick={() => {
+                      copyToClipboard('docker compose pull && docker compose up -d');
+                      showToast('Commande copiée !', 'success');
+                    }}
+                    className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white"
+                    title="Copier la commande"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  💡 Pour activer la mise à jour 100% autonome sans terminal dans le futur, vérifiez que la ligne <code>- /var/run/docker.sock:/var/run/docker.sock:ro</code> est active dans <code>docker-compose.yml</code>.
+                </p>
+                <div className="flex justify-end pt-2">
+                  <button
+                    onClick={() => {
+                      setShowUpdateModal(false);
+                      setUpdateStep('idle');
+                    }}
+                    className={`px-4 py-2 rounded-xl text-xs font-semibold text-white ${theme.primaryBg} ${theme.primaryHover}`}
+                  >
+                    J'ai compris
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

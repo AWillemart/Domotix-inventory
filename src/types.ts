@@ -47,6 +47,25 @@ export interface AppSettings {
   theme_color: ThemeColor;
   color_mode: ColorMode;
   domotix_port?: number;
+  github_repo?: string;
+  github_branch?: string;
+}
+
+export interface UpdateInfo {
+  update_available: boolean;
+  current_version: string;
+  latest_version: string;
+  latest_commit?: string;
+  commit_message?: string;
+  author?: string;
+  commit_date?: string;
+  html_url?: string;
+  repo?: string;
+  branch?: string;
+  can_auto_update?: boolean;
+  docker_sock_present?: boolean;
+  error?: string;
+  last_checked?: string;
 }
 
 export type ToastType = 'success' | 'error' | 'warning';

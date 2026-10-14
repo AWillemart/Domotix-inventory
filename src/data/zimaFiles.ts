@@ -29,6 +29,8 @@ services:
     volumes:
       # Volume persistant pour la base de données SQLite
       - ./data:/data
+      # OPTIONNEL : Permet la mise à jour 1-clic autonome depuis l'interface web
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - DATABASE_URL=sqlite:////data/inventory.db
       # URLs des microservices IA locaux (adaptables selon votre réseau ZimaOS)
@@ -36,6 +38,9 @@ services:
       - WHISPER_URL=http://faster-whisper:9000
       - PIPER_URL=http://piper:5000
       - DEFAULT_OLLAMA_MODEL=gemma3:4b
+      # Dépôt GitHub pour les mises à jour dans l'interface
+      - GITHUB_REPO=awillemart/domotix-inventory
+      - GITHUB_BRANCH=main
     networks:
       - domotix-network
     # Permet de communiquer avec l'hôte ZimaOS si Ollama/Whisper tournent hors Docker
@@ -1189,6 +1194,107 @@ __pycache__
 data/
 *.db
 domotix_zimaos.zip
+`,
+  },
+  'update.sh': {
+    filename: 'update.sh',
+    role: 'Script de mise à jour 1-clic depuis GitHub (pull image GHCR ou Git et redémarrage)',
+    language: 'bash',
+    content: `#!/bin/bash
+set -e
+echo "🚀 [Domotix] Recherche et application des mises à jour..."
+if [ -d ".git" ]; then
+    git pull origin main || true
+fi
+DOCKER_CMD="docker"
+if ! docker info &> /dev/null; then
+    if command -v sudo &> /dev/null && sudo docker info &> /dev/null; then
+        DOCKER_CMD="sudo docker"
+    fi
+fi
+if $DOCKER_CMD compose version &> /dev/null; then
+    $DOCKER_CMD compose pull || true
+    $DOCKER_CMD compose up -d --build
+elif command -v docker-compose &> /dev/null; then
+    docker-compose pull || true
+    docker-compose up -d --build
+else
+    $DOCKER_CMD build -t domotix .
+    $DOCKER_CMD restart domotix-inventory || true
+fi
+echo "🎉 Mise à jour terminée avec succès !"
+`,
+  },
+  '.github/workflows/docker-publish.yml': {
+    filename: '.github/workflows/docker-publish.yml',
+    role: 'Workflow GitHub Actions : build automatique multi-arch et publication sur GitHub Packages (GHCR)',
+    language: 'yaml',
+    content: `name: Build and Publish Docker Image to GHCR
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ 'v*.*.*' ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Sanitize image repository name
+        id: prep
+        run: |
+          RAW_NAME="\${{ github.repository }}"
+          CLEAN_NAME=$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[-._]+$//')
+          if [ -z "$CLEAN_NAME" ]; then
+            CLEAN_NAME="\${{ github.repository_owner }}/domotix-inventory"
+          fi
+          echo "IMAGE_NAME=\${CLEAN_NAME}" >> $GITHUB_ENV
+          echo "image_name=\${CLEAN_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Set up QEMU (multi-arch support)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: \${{ env.REGISTRY }}
+          username: \${{ github.actor }}
+          password: \${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: \${{ env.REGISTRY }}/\${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: \${{ steps.meta.outputs.tags }}
+          labels: \${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 `,
   },
 };

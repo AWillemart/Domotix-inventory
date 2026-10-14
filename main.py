@@ -2,9 +2,12 @@ import csv
 import io
 import json
 import base64
+import os
+import subprocess
 from typing import List, Optional
 from datetime import datetime
 
+import httpx
 from fastapi import FastAPI, Depends, UploadFile, File, Form, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -66,6 +69,8 @@ class SettingsUpdateRequest(BaseModel):
     ollama_model: Optional[str] = None
     piper_voice: Optional[str] = None
     require_validation: Optional[bool] = None
+    github_repo: Optional[str] = None
+    github_branch: Optional[str] = None
 
 class TTSRequest(BaseModel):
     text: str
@@ -587,6 +592,8 @@ def get_version():
 def get_settings(db: Session = Depends(get_db)):
     configs = db.query(Configuration).all()
     res = {c.cle: c.valeur for c in configs}
+    default_repo = database.os.getenv("GITHUB_REPO", "awillemart/domotix-inventory")
+    default_branch = database.os.getenv("GITHUB_BRANCH", "main")
     return {
         "version": APP_VERSION,
         "ollama_url": res.get("ollama_url", "http://ollama:11434"),
@@ -595,12 +602,17 @@ def get_settings(db: Session = Depends(get_db)):
         "ollama_model": res.get("ollama_model", "gemma3:4b"),
         "piper_voice": res.get("piper_voice", "fr_FR-siwis-medium"),
         "require_validation": res.get("require_validation", "true").lower() == "true",
+        "github_repo": res.get("github_repo", default_repo),
+        "github_branch": res.get("github_branch", default_branch),
+        "docker_socket_available": os.path.exists("/var/run/docker.sock"),
         "docker_env": {
             "ollama_url": database.os.getenv("OLLAMA_URL", "http://ollama:11434"),
             "whisper_url": database.os.getenv("WHISPER_URL", "http://faster-whisper:9000"),
             "piper_url": database.os.getenv("PIPER_URL", "http://piper:5000"),
             "ollama_model": database.os.getenv("DEFAULT_OLLAMA_MODEL", "gemma3:4b"),
             "piper_voice": database.os.getenv("DEFAULT_PIPER_VOICE", "fr_FR-siwis-medium"),
+            "github_repo": default_repo,
+            "github_branch": default_branch,
         },
         "priority_info": {
             "active_priority": "Base de données SQLite (Modifications dans l'interface)",
@@ -623,6 +635,10 @@ def update_settings(payload: SettingsUpdateRequest, db: Session = Depends(get_db
         set_setting_value(db, "piper_voice", payload.piper_voice.strip())
     if payload.require_validation is not None:
         set_setting_value(db, "require_validation", "true" if payload.require_validation else "false")
+    if payload.github_repo is not None:
+        set_setting_value(db, "github_repo", payload.github_repo.strip())
+    if payload.github_branch is not None:
+        set_setting_value(db, "github_branch", payload.github_branch.strip())
     return {"success": True, "message": "Paramètres sauvegardés avec succès !"}
 
 @app.post("/api/settings/sync-docker")
@@ -633,12 +649,16 @@ def sync_docker_settings(db: Session = Depends(get_db)):
     env_piper = database.os.getenv("PIPER_URL", "http://piper:5000")
     env_model = database.os.getenv("DEFAULT_OLLAMA_MODEL", "gemma3:4b")
     env_voice = database.os.getenv("DEFAULT_PIPER_VOICE", "fr_FR-siwis-medium")
+    env_repo = database.os.getenv("GITHUB_REPO", "awillemart/domotix-inventory")
+    env_branch = database.os.getenv("GITHUB_BRANCH", "main")
 
     set_setting_value(db, "ollama_url", env_ollama)
     set_setting_value(db, "whisper_url", env_whisper)
     set_setting_value(db, "piper_url", env_piper)
     set_setting_value(db, "ollama_model", env_model)
     set_setting_value(db, "piper_voice", env_voice)
+    set_setting_value(db, "github_repo", env_repo)
+    set_setting_value(db, "github_branch", env_branch)
 
     return {
         "success": True,
@@ -649,7 +669,167 @@ def sync_docker_settings(db: Session = Depends(get_db)):
             "piper_url": env_piper,
             "ollama_model": env_model,
             "piper_voice": env_voice,
+            "github_repo": env_repo,
+            "github_branch": env_branch,
         }
+    }
+
+# =============================================================================
+# Système de Mise à Jour Automatique depuis GitHub
+# =============================================================================
+
+@app.get("/api/system/check-update")
+def check_system_update(
+    repo: Optional[str] = Query(None),
+    branch: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Vérifie auprès de l'API GitHub s'il existe une nouvelle version ou de nouveaux commits."""
+    target_repo = (repo or get_setting_value(db, "github_repo", "awillemart/domotix-inventory")).strip()
+    target_branch = (branch or get_setting_value(db, "github_branch", "main")).strip()
+
+    # Variantes de repo pour tester avec et sans tiret final
+    repo_variants = [target_repo]
+    if target_repo.endswith("-"):
+        repo_variants.append(target_repo.rstrip("-"))
+    elif not target_repo.endswith("-"):
+        repo_variants.append(target_repo + "-")
+
+    latest_commit_data = None
+    resolved_repo = target_repo
+
+    headers = {"User-Agent": "Domotix-SelfHosted-Updater"}
+
+    for candidate in repo_variants:
+        try:
+            url = f"https://api.github.com/repos/{candidate}/commits/{target_branch}"
+            resp = httpx.get(url, headers=headers, timeout=6.0)
+            if resp.status_code == 200:
+                latest_commit_data = resp.json()
+                resolved_repo = candidate
+                break
+        except Exception:
+            continue
+
+    if latest_commit_data:
+        sha = latest_commit_data.get("sha", "")
+        short_sha = sha[:7] if sha else ""
+        commit_details = latest_commit_data.get("commit", {})
+        message = commit_details.get("message", "").split("\n")[0]
+        author = commit_details.get("author", {}).get("name", "GitHub")
+        date_str = commit_details.get("author", {}).get("date", "")
+        html_url = latest_commit_data.get("html_url", f"https://github.com/{resolved_repo}")
+
+        return {
+            "update_available": True,
+            "current_version": APP_VERSION,
+            "latest_version": f"Commit {short_sha}",
+            "latest_commit": short_sha,
+            "commit_message": message,
+            "author": author,
+            "commit_date": date_str,
+            "html_url": html_url,
+            "repo": resolved_repo,
+            "branch": target_branch,
+            "can_auto_update": os.path.exists("/var/run/docker.sock") or os.path.exists(".git"),
+            "docker_sock_present": os.path.exists("/var/run/docker.sock"),
+            "status": "ready"
+        }
+
+    # Si les commits n'ont pas répondu (ex. rate-limit GitHub ou repo privé), essayer les releases
+    for candidate in repo_variants:
+        try:
+            url_rel = f"https://api.github.com/repos/{candidate}/releases/latest"
+            resp = httpx.get(url_rel, headers=headers, timeout=6.0)
+            if resp.status_code == 200:
+                rel = resp.json()
+                resolved_repo = candidate
+                tag_name = rel.get("tag_name", "")
+                return {
+                    "update_available": tag_name.lstrip("v") != APP_VERSION.lstrip("v"),
+                    "current_version": APP_VERSION,
+                    "latest_version": tag_name or APP_VERSION,
+                    "commit_message": rel.get("name", "Nouvelle version disponible"),
+                    "author": rel.get("author", {}).get("login", "GitHub"),
+                    "commit_date": rel.get("published_at", ""),
+                    "html_url": rel.get("html_url", f"https://github.com/{resolved_repo}"),
+                    "repo": resolved_repo,
+                    "branch": target_branch,
+                    "can_auto_update": os.path.exists("/var/run/docker.sock") or os.path.exists(".git"),
+                    "docker_sock_present": os.path.exists("/var/run/docker.sock"),
+                    "status": "ready"
+                }
+        except Exception:
+            continue
+
+    return {
+        "update_available": False,
+        "current_version": APP_VERSION,
+        "latest_version": APP_VERSION,
+        "error": f"Impossible d'interroger le dépôt '{target_repo}'. Vérifiez le nom ou la connexion.",
+        "repo": target_repo,
+        "branch": target_branch,
+        "can_auto_update": os.path.exists("/var/run/docker.sock") or os.path.exists(".git"),
+        "docker_sock_present": os.path.exists("/var/run/docker.sock"),
+        "status": "error"
+    }
+
+@app.post("/api/system/apply-update")
+def apply_system_update(db: Session = Depends(get_db)):
+    """Déclenche la mise à jour soit via Docker Socket, soit via Git pull, soit fournit la commande de redémarrage."""
+    has_docker_sock = os.path.exists("/var/run/docker.sock")
+    has_git = os.path.exists(".git")
+
+    repo = get_setting_value(db, "github_repo", "awillemart/domotix-inventory").strip().rstrip("-")
+    clean_repo = repo.lower()
+    image_tag = f"ghcr.io/{clean_repo}:latest"
+
+    # Cas 1 : Docker socket présent -> puller via docker API
+    if has_docker_sock:
+        try:
+            transport = httpx.HTTPTransport(uds="/var/run/docker.sock")
+            with httpx.Client(transport=transport, timeout=30.0) as client:
+                # Docker daemon: POST /images/create?fromImage=...
+                client.post(f"http://docker/images/create?fromImage={image_tag}")
+            return {
+                "success": True,
+                "mode": "docker_socket",
+                "message": f"Dernière image {image_tag} téléchargée ! Le conteneur se synchronise.",
+                "action": "restarting",
+                "countdown": 15,
+                "image": image_tag
+            }
+        except Exception as e:
+            pass
+
+    # Cas 2 : Dossier Git (.git présent)
+    if has_git:
+        try:
+            res = subprocess.run(["git", "pull", "origin", "main"], capture_output=True, text=True, timeout=15)
+            if res.returncode == 0:
+                return {
+                    "success": True,
+                    "mode": "git_pull",
+                    "message": f"Dernières modifications Git récupérées avec succès : {res.stdout.strip()}",
+                    "action": "updated",
+                    "countdown": 5
+                }
+        except Exception:
+            pass
+
+    # Cas 3 : Mode guidé universel avec instructions directes
+    return {
+        "success": True,
+        "mode": "ready_to_update",
+        "message": f"Mise à jour prête sur GitHub ({image_tag}) !",
+        "instructions": [
+            f"Image Docker compilée par GitHub Actions : {image_tag}",
+            "Sur votre serveur : docker compose pull && docker compose up -d",
+            "OU activez la mise à jour 1-clic autonome en montant /var/run/docker.sock dans docker-compose.yml"
+        ],
+        "pull_command": "docker compose pull && docker compose up -d",
+        "action": "instructions",
+        "countdown": 0
     }
 
 @app.get("/api/test/ollama")

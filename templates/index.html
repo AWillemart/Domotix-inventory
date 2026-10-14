@@ -363,6 +363,49 @@
         </div>
       </div>
 
+      <!-- Mises à Jour & Déploiement GitHub -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-lg">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400">
+              <i data-lucide="git-branch" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <h2 class="text-sm font-semibold text-white">Mises à Jour du Système & GitHub</h2>
+                <span id="badge-current-version" class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 font-semibold">v1.3.0</span>
+              </div>
+              <p class="text-xs text-slate-400">Vérifiez les nouvelles versions sur GitHub et mettez à jour votre serveur sans taper de commande.</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="checkGitHubUpdate(true)" id="btn-check-update" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors border border-slate-700">
+              <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+              <span>Vérifier maintenant</span>
+            </button>
+            <button onclick="applyGitHubUpdate()" id="btn-install-update" class="hidden px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-lg">
+              <i data-lucide="arrow-up-circle" class="w-3.5 h-3.5"></i>
+              <span>Installer la mise à jour</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-slate-800 pt-3">
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1">Dépôt GitHub (owner/repo)</label>
+            <input type="text" id="cfg-github-repo" value="awillemart/domotix-inventory" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-mono">
+          </div>
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1">Branche cible</label>
+            <input type="text" id="cfg-github-branch" value="main" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-mono">
+          </div>
+        </div>
+
+        <div id="update-status-panel" class="hidden rounded-xl p-4 border bg-slate-950/80 border-slate-800 text-xs space-y-2">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+
     </section>
 
   </main>
@@ -1577,9 +1620,14 @@
         document.getElementById("cfg-whisper-url").value = cfg.whisper_url || "http://faster-whisper:9000";
         document.getElementById("cfg-piper-url").value = cfg.piper_url || "http://piper:5000";
         document.getElementById("cfg-require-validation").checked = cfg.require_validation;
+        if (cfg.github_repo) document.getElementById("cfg-github-repo").value = cfg.github_repo;
+        if (cfg.github_branch) document.getElementById("cfg-github-branch").value = cfg.github_branch;
         
         const sel = document.getElementById("cfg-ollama-model");
         sel.value = cfg.ollama_model || "gemma3:4b";
+
+        // Vérification silencieuse des mises à jour
+        setTimeout(() => checkGitHubUpdate(false), 1000);
       } catch (e) {
         console.error("Erreur chargement réglages :", e);
       }
@@ -1591,7 +1639,9 @@
         whisper_url: document.getElementById("cfg-whisper-url").value.trim(),
         piper_url: document.getElementById("cfg-piper-url").value.trim(),
         ollama_model: document.getElementById("cfg-ollama-model").value,
-        require_validation: document.getElementById("cfg-require-validation").checked
+        require_validation: document.getElementById("cfg-require-validation").checked,
+        github_repo: document.getElementById("cfg-github-repo").value.trim(),
+        github_branch: document.getElementById("cfg-github-branch").value.trim()
       };
 
       try {
@@ -1606,6 +1656,84 @@
         }
       } catch (e) {
         showTemporaryToast("Erreur d'enregistrement : " + e.message, "error");
+      }
+    }
+
+    async function checkGitHubUpdate(manual = false) {
+      const btn = document.getElementById("btn-check-update");
+      const installBtn = document.getElementById("btn-install-update");
+      const statusPanel = document.getElementById("update-status-panel");
+      const repo = document.getElementById("cfg-github-repo").value.trim();
+      const branch = document.getElementById("cfg-github-branch").value.trim();
+
+      if (btn) btn.classList.add("opacity-50", "pointer-events-none");
+
+      try {
+        const res = await fetch(`/api/system/check-update?repo=${encodeURIComponent(repo)}&branch=${encodeURIComponent(branch)}`);
+        const data = await res.json();
+
+        statusPanel.classList.remove("hidden");
+        if (data.update_available) {
+          installBtn.classList.remove("hidden");
+          statusPanel.innerHTML = `
+            <div class="flex items-center gap-2 text-emerald-400 font-semibold">
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+              <span>Nouvelle version détectée : <strong>${data.latest_version}</strong></span>
+            </div>
+            <p class="text-slate-300 font-mono">"${data.commit_message || 'Nouvelle mise à jour disponible'}"</p>
+            <p class="text-slate-400 text-[11px]">Par ${data.author || 'GitHub'} · ${data.commit_date ? new Date(data.commit_date).toLocaleString('fr-FR') : ''}</p>
+            <p class="text-emerald-300 text-[11px] pt-1">👉 Cliquez sur "Installer la mise à jour" ci-dessus pour l'appliquer.</p>
+          `;
+          if (manual) showTemporaryToast(`Nouvelle mise à jour disponible (${data.latest_version}) !`, "success");
+        } else if (data.error) {
+          installBtn.classList.add("hidden");
+          statusPanel.innerHTML = `<span class="text-amber-400">⚠️ ${data.error}</span>`;
+          if (manual) showTemporaryToast("Impossible de joindre GitHub.", "warning");
+        } else {
+          installBtn.classList.add("hidden");
+          statusPanel.innerHTML = `<span class="text-emerald-400">✅ Domotix est parfaitement à jour (branche ${branch}).</span>`;
+          if (manual) showTemporaryToast("Domotix est à jour !", "success");
+        }
+      } catch (e) {
+        if (manual) showTemporaryToast("Erreur lors de la vérification : " + e.message, "error");
+      } finally {
+        if (btn) btn.classList.remove("opacity-50", "pointer-events-none");
+        lucide.createIcons();
+      }
+    }
+
+    async function applyGitHubUpdate() {
+      const installBtn = document.getElementById("btn-install-update");
+      const statusPanel = document.getElementById("update-status-panel");
+      if (installBtn) installBtn.classList.add("opacity-50", "pointer-events-none");
+
+      statusPanel.innerHTML = `
+        <div class="flex items-center gap-2 text-amber-400 font-semibold">
+          <span class="w-3 h-3 rounded-full border-2 border-amber-400 border-t-transparent animate-spin"></span>
+          <span>Téléchargement et application de la mise à jour en cours...</span>
+        </div>
+        <p class="text-slate-400 text-[11px]">Le conteneur redémarre avec la nouvelle image GHCR. Vos données SQLite sont préservées.</p>
+      `;
+
+      try {
+        const res = await fetch("/api/system/apply-update", { method: "POST" });
+        const data = await res.json();
+        
+        statusPanel.innerHTML = `
+          <p class="text-emerald-400 font-semibold">📦 ${data.message}</p>
+          <p class="text-slate-300 text-[11px]">Reconnexion automatique au serveur dans quelques secondes...</p>
+        `;
+        setTimeout(() => {
+          window.location.reload();
+        }, 12000);
+      } catch (e) {
+        statusPanel.innerHTML = `
+          <p class="text-slate-300 font-semibold">Signal de redémarrage envoyé.</p>
+          <p class="text-slate-400 text-[11px]">Rechargement de l'interface en cours...</p>
+        `;
+        setTimeout(() => {
+          window.location.reload();
+        }, 10000);
       }
     }
 

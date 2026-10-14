@@ -13,6 +13,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme_color: 'emerald',
   color_mode: 'dark',
   domotix_port: 8585,
+  github_repo: 'awillemart/domotix-inventory',
+  github_branch: 'main',
 };
 
 export const INITIAL_INVENTORY: Piece[] = [

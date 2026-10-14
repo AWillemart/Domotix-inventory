@@ -16,6 +16,9 @@ services:
     volumes:
       # Volume persistant pour la base de données SQLite
       - ./data:/data
+      # OPTIONNEL POUR MISE À JOUR 1-CLIC DANS L'INTERFACE :
+      # Permet à l'application Domotix de déclencher la mise à jour de son propre conteneur depuis le bouton de l'interface web
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - DATABASE_URL=sqlite:////data/inventory.db
       # URLs des microservices IA locaux (adaptables selon votre réseau ZimaOS)
@@ -23,6 +26,9 @@ services:
       - WHISPER_URL=http://faster-whisper:9000
       - PIPER_URL=http://piper:5000
       - DEFAULT_OLLAMA_MODEL=gemma3:4b
+      # Dépôt GitHub pour les vérifications de mise à jour dans l'interface
+      - GITHUB_REPO=awillemart/domotix-inventory
+      - GITHUB_BRANCH=main
     networks:
       - domotix-network
     # Permet de communiquer avec l'hôte ZimaOS si Ollama/Whisper tournent hors Docker

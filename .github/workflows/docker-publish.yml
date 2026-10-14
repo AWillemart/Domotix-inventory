@@ -8,7 +8,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build-and-push:
@@ -20,6 +19,20 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # Assure un nom d'image valide pour Docker/OCI (minuscules, sans tiret/point/underscore à la fin)
+      - name: Sanitize image repository name
+        id: prep
+        run: |
+          RAW_NAME="${{ github.repository }}"
+          # Convertir en minuscules (requis par Docker) et supprimer les tirets/points/underscores en fin de chaîne
+          CLEAN_NAME=$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[-._]+$//')
+          if [ -z "$CLEAN_NAME" ]; then
+            CLEAN_NAME="${{ github.repository_owner }}/domotix-inventory"
+          fi
+          echo "IMAGE_NAME=${CLEAN_NAME}" >> $GITHUB_ENV
+          echo "image_name=${CLEAN_NAME}" >> $GITHUB_OUTPUT
+          echo "Sanitized Docker image: ghcr.io/${CLEAN_NAME}"
 
       - name: Set up QEMU (multi-arch support)
         uses: docker/setup-qemu-action@v3
@@ -45,7 +58,7 @@ jobs:
             type=semver,pattern={{version}}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
